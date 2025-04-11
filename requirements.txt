@@ -1,0 +1,7 @@
+flask
+flask-cors
+flask-sqlalchemy
+flask-migrate
+python-dotenv
+flask-jwt-extended
+flask-admin
