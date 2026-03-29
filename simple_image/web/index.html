@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Simple Image</title>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <div class="bg-shape bg-shape-1"></div>
+    <div class="bg-shape bg-shape-2"></div>
+
+    <el-container class="shell">
+      <el-header class="header">
+        <div class="brand">
+          <h1>Simple Image</h1>
+          <p>FastAPI + Vue3 + Element Plus</p>
+        </div>
+        <div class="header-actions">
+          <el-tag v-if="user" type="success">{{ user.username }}<span v-if="user.is_admin"> (admin)</span></el-tag>
+          <el-button v-if="user" size="small" @click="logout">退出登录</el-button>
+        </div>
+      </el-header>
+
+      <el-main class="main">
+        <el-row :gutter="20">
+          <el-col :xs="24" :sm="24" :md="8" :lg="7">
+            <el-card class="panel" shadow="hover">
+              <h3 class="panel-title">登录</h3>
+              <el-form :model="loginForm" @submit.prevent="login">
+                <el-form-item label="用户名">
+                  <el-input v-model="loginForm.username" autocomplete="username" placeholder="请输入用户名"></el-input>
+                </el-form-item>
+                <el-form-item label="密码">
+                  <el-input v-model="loginForm.password" type="password" show-password autocomplete="current-password" placeholder="请输入密码"></el-input>
+                </el-form-item>
+                <el-button type="primary" :loading="loginLoading" @click="login" style="width:100%">登录</el-button>
+              </el-form>
+              <p class="hint">仅管理员可新增用户和修改密码。查看图片无需登录。</p>
+            </el-card>
+
+            <el-card v-if="user && user.is_admin" class="panel" shadow="hover">
+              <h3 class="panel-title">管理员 · 用户管理</h3>
+              <el-form :model="createUserForm" label-position="top">
+                <el-form-item label="新用户名">
+                  <el-input v-model="createUserForm.username" placeholder="例如: alice"></el-input>
+                </el-form-item>
+                <el-form-item label="初始密码">
+                  <el-input v-model="createUserForm.password" type="password" show-password></el-input>
+                </el-form-item>
+                <el-form-item label="邮箱（可选）">
+                  <el-input v-model="createUserForm.email"></el-input>
+                </el-form-item>
+                <el-button type="primary" :loading="adminLoading" @click="createUser" style="width:100%">新增用户</el-button>
+              </el-form>
+              <div class="divider"></div>
+              <el-button plain size="small" @click="loadUsers" :loading="adminLoading">刷新用户列表</el-button>
+              <el-table :data="users" size="small" style="margin-top: 10px" max-height="220">
+                <el-table-column prop="username" label="用户名" min-width="90"></el-table-column>
+                <el-table-column label="角色" min-width="70">
+                  <template #default="scope">
+                    <el-tag :type="scope.row.is_admin ? 'danger' : 'info'" size="small">{{ scope.row.is_admin ? 'admin' : 'user' }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="压缩策略" min-width="140">
+                  <template #default="scope">
+                    <el-tag :type="scope.row.compress_enabled ? 'success' : 'warning'" size="small">
+                      {{ scope.row.compress_enabled ? ('开启 / Q' + scope.row.compress_quality) : '关闭' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="改密" min-width="130">
+                  <template #default="scope">
+                    <el-button size="small" @click="openPasswordDialog(scope.row)">修改密码</el-button>
+                  </template>
+                </el-table-column>
+                <el-table-column label="压缩设置" min-width="120">
+                  <template #default="scope">
+                    <el-button size="small" type="primary" plain @click="openUploadSettingsDialog(scope.row)">设置</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-card>
+          </el-col>
+
+          <el-col :xs="24" :sm="24" :md="16" :lg="17">
+            <el-card class="panel" shadow="hover">
+              <el-tabs v-model="activeTab" type="border-card">
+                <el-tab-pane label="上传图片" name="upload">
+                  <el-alert
+                    title="上传图片需要登录"
+                    type="info"
+                    :closable="false"
+                    style="margin-bottom:12px"
+                  ></el-alert>
+
+                  <el-upload
+                    ref="uploadRef"
+                    action=""
+                    drag
+                    multiple
+                    :auto-upload="false"
+                    :on-change="onFileChange"
+                    :on-remove="onFileRemove"
+                    :file-list="fileList"
+                    :limit="5"
+                    accept="image/*"
+                  >
+                    <div class="el-upload__text">拖拽图片到此处，或<em>点击选择</em></div>
+                    <template #tip>
+                      <div class="el-upload__tip">最多 5 张，每张建议不超过 5MB</div>
+                    </template>
+                  </el-upload>
+
+                  <div class="preview-list" v-if="uploadItems.length">
+                    <div v-for="item in uploadItems" :key="item.uid" class="preview-item">
+                      <img :src="item.preview" alt="preview" />
+                      <div class="preview-meta">
+                        <div class="name">{{ item.file.name }}</div>
+                        <el-select
+                          v-model="item.tags"
+                          multiple
+                          filterable
+                          allow-create
+                          default-first-option
+                          placeholder="标签（可创建）"
+                          style="width:100%"
+                        >
+                          <el-option v-for="tag in tags" :key="tag" :label="tag" :value="tag"></el-option>
+                        </el-select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <el-button type="primary" :disabled="!uploadItems.length" :loading="uploadLoading" @click="uploadAll">
+                    上传已选图片
+                  </el-button>
+
+                  <el-alert
+                    v-for="res in uploadResults"
+                    :key="res.id"
+                    :title="res.filename + ' 上传成功：' + res.url"
+                    type="success"
+                    :closable="false"
+                    style="margin-top:8px"
+                  ></el-alert>
+                </el-tab-pane>
+
+                <el-tab-pane label="我的图片" name="images">
+                  <el-row :gutter="8" style="margin-bottom: 12px;">
+                    <el-col :span="18">
+                      <el-select v-model="imageFilterTag" clearable filterable placeholder="按标签筛选" style="width: 100%" @change="fetchMyImages">
+                        <el-option v-for="tag in tags" :key="tag" :label="tag" :value="tag"></el-option>
+                      </el-select>
+                    </el-col>
+                    <el-col :span="6">
+                      <el-button style="width:100%" :loading="imagesLoading" @click="fetchMyImages">刷新</el-button>
+                    </el-col>
+                  </el-row>
+
+                  <el-empty v-if="!imagesLoading && !images.length" description="暂无图片"></el-empty>
+                  <div class="image-grid">
+                    <el-card v-for="img in images" :key="img.id" class="image-card" shadow="never">
+                      <img class="image-thumb" :src="apiBase + '/image/' + img.id" :alt="img.filename" />
+                      <div class="image-content">
+                        <h4>{{ img.filename }}</h4>
+                        <p>上传时间：{{ formatDate(img.upload_time) }}</p>
+                        <p>链接：<a :href="apiBase + '/image/' + img.id" target="_blank">{{ apiBase + '/image/' + img.id }}</a></p>
+                        <p>
+                          压缩：{{ formatSize(img.original_size) }} → {{ formatSize(img.compressed_size) }}
+                          （节省 {{ savePercent(img) }}%）
+                        </p>
+                        <el-select
+                          v-model="img._editTags"
+                          multiple
+                          filterable
+                          allow-create
+                          default-first-option
+                          placeholder="编辑标签"
+                          style="width:100%"
+                        >
+                          <el-option v-for="tag in tags" :key="tag" :label="tag" :value="tag"></el-option>
+                        </el-select>
+                        <div class="card-actions">
+                          <el-button size="small" @click="updateTags(img)">更新标签</el-button>
+                          <el-popconfirm title="确认删除该图片？" @confirm="deleteImage(img)">
+                            <template #reference>
+                              <el-button size="small" type="danger" plain>删除</el-button>
+                            </template>
+                          </el-popconfirm>
+                        </div>
+                      </div>
+                    </el-card>
+                  </div>
+                </el-tab-pane>
+              </el-tabs>
+            </el-card>
+          </el-col>
+        </el-row>
+      </el-main>
+    </el-container>
+
+    <el-dialog title="修改用户密码" v-model="passwordDialogVisible" width="420px">
+      <el-form :model="passwordForm" label-position="top">
+        <el-form-item label="用户">
+          <el-input :model-value="passwordForm.username" disabled></el-input>
+        </el-form-item>
+        <el-form-item label="新密码">
+          <el-input v-model="passwordForm.password" type="password" show-password></el-input>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="passwordDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="adminLoading" @click="updatePassword">确定</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+    <el-dialog title="用户上传压缩设置" v-model="uploadSettingsDialogVisible" width="460px">
+      <el-form :model="uploadSettingsForm" label-position="top">
+        <el-form-item label="用户">
+          <el-input :model-value="uploadSettingsForm.username" disabled></el-input>
+        </el-form-item>
+        <el-form-item label="是否启用压缩">
+          <el-switch v-model="uploadSettingsForm.compress_enabled"></el-switch>
+        </el-form-item>
+        <el-form-item label="压缩率 Quality (1-95)">
+          <el-input-number
+            v-model="uploadSettingsForm.compress_quality"
+            :min="1"
+            :max="95"
+            :disabled="!uploadSettingsForm.compress_enabled"
+            style="width: 100%"
+          ></el-input-number>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="uploadSettingsDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="adminLoading" @click="updateUploadSettings">保存</el-button>
+        </span>
+      </template>
+    </el-dialog>
+  </div>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/element-plus/dist/index.full.min.js"></script>
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

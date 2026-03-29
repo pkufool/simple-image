@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "simple-image"
+version = "0.1.0"
+description = "Simple image hosting app with FastAPI + Vue3"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "simple-image contributors" }
+]
+dependencies = [
+  "fastapi==0.104.1",
+  "uvicorn==0.24.0.post1",
+  "python-multipart==0.0.6",
+  "python-dotenv==1.0.0",
+  "sqlalchemy==2.0.23",
+  "Pillow==10.2.0",
+  "PyMySQL==1.1.1"
+]
+
+[project.scripts]
+simple-image = "simple_image.cli:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["simple_image*"]
+
+[tool.setuptools.package-data]
+simple_image = ["web/**/*"]
