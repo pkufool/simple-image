@@ -20,81 +20,23 @@
         </div>
         <div class="header-actions">
           <el-tag v-if="user" type="success">{{ user.username }}<span v-if="user.is_admin"> (admin)</span></el-tag>
+          <el-button v-if="user && user.is_admin" size="small" type="primary" plain @click="openAdminDialog">管理</el-button>
           <el-button v-if="user" size="small" @click="logout">退出登录</el-button>
         </div>
       </el-header>
 
       <el-main class="main">
         <el-row :gutter="20">
-          <el-col :xs="24" :sm="24" :md="8" :lg="7">
+          <el-col :xs="24" :sm="24" :md="24" :lg="24">
             <el-card class="panel" shadow="hover">
-              <h3 class="panel-title">登录</h3>
-              <el-form :model="loginForm" @submit.prevent="login">
-                <el-form-item label="用户名">
-                  <el-input v-model="loginForm.username" autocomplete="username" placeholder="请输入用户名"></el-input>
-                </el-form-item>
-                <el-form-item label="密码">
-                  <el-input v-model="loginForm.password" type="password" show-password autocomplete="current-password" placeholder="请输入密码"></el-input>
-                </el-form-item>
-                <el-button type="primary" :loading="loginLoading" @click="login" style="width:100%">登录</el-button>
-              </el-form>
-              <p class="hint">仅管理员可新增用户和修改密码。查看图片无需登录。</p>
-            </el-card>
-
-            <el-card v-if="user && user.is_admin" class="panel" shadow="hover">
-              <h3 class="panel-title">管理员 · 用户管理</h3>
-              <el-form :model="createUserForm" label-position="top">
-                <el-form-item label="新用户名">
-                  <el-input v-model="createUserForm.username" placeholder="例如: alice"></el-input>
-                </el-form-item>
-                <el-form-item label="初始密码">
-                  <el-input v-model="createUserForm.password" type="password" show-password></el-input>
-                </el-form-item>
-                <el-form-item label="邮箱（可选）">
-                  <el-input v-model="createUserForm.email"></el-input>
-                </el-form-item>
-                <el-button type="primary" :loading="adminLoading" @click="createUser" style="width:100%">新增用户</el-button>
-              </el-form>
-              <div class="divider"></div>
-              <el-button plain size="small" @click="loadUsers" :loading="adminLoading">刷新用户列表</el-button>
-              <el-table :data="users" size="small" style="margin-top: 10px" max-height="220">
-                <el-table-column prop="username" label="用户名" min-width="90"></el-table-column>
-                <el-table-column label="角色" min-width="70">
-                  <template #default="scope">
-                    <el-tag :type="scope.row.is_admin ? 'danger' : 'info'" size="small">{{ scope.row.is_admin ? 'admin' : 'user' }}</el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column label="压缩策略" min-width="140">
-                  <template #default="scope">
-                    <el-tag :type="scope.row.compress_enabled ? 'success' : 'warning'" size="small">
-                      {{ scope.row.compress_enabled ? ('开启 / Q' + scope.row.compress_quality) : '关闭' }}
-                    </el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column label="改密" min-width="130">
-                  <template #default="scope">
-                    <el-button size="small" @click="openPasswordDialog(scope.row)">修改密码</el-button>
-                  </template>
-                </el-table-column>
-                <el-table-column label="压缩设置" min-width="120">
-                  <template #default="scope">
-                    <el-button size="small" type="primary" plain @click="openUploadSettingsDialog(scope.row)">设置</el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </el-card>
-          </el-col>
-
-          <el-col :xs="24" :sm="24" :md="16" :lg="17">
-            <el-card class="panel" shadow="hover">
-              <el-tabs v-model="activeTab" type="border-card">
+              <el-tabs v-model="activeTab" type="border-card" @tab-click="onTabClick">
                 <el-tab-pane label="上传图片" name="upload">
-                  <el-alert
-                    title="上传图片需要登录"
-                    type="info"
-                    :closable="false"
-                    style="margin-bottom:12px"
-                  ></el-alert>
+                  <el-alert v-if="!user" title="上传图片需要登录" type="info" :closable="false" style="margin-bottom:12px">
+                    <template #default>
+                      上传图片需要登录。
+                      <el-button text type="primary" @click="requestLogin('上传图片')">去登录</el-button>
+                    </template>
+                  </el-alert>
 
                   <el-upload
                     ref="uploadRef"
@@ -149,9 +91,16 @@
                 </el-tab-pane>
 
                 <el-tab-pane label="我的图片" name="images">
+                  <el-alert v-if="!user" title="查看图片需要登录" type="info" :closable="false" style="margin-bottom:12px">
+                    <template #default>
+                      查看和管理我的图片需要登录。
+                      <el-button text type="primary" @click="requestLogin('查看图片')">去登录</el-button>
+                    </template>
+                  </el-alert>
+
                   <el-row :gutter="8" style="margin-bottom: 12px;">
                     <el-col :span="18">
-                      <el-select v-model="imageFilterTag" clearable filterable placeholder="按标签筛选" style="width: 100%" @change="fetchMyImages">
+                      <el-select v-model="imageFilterTag" clearable filterable placeholder="按标签筛选" style="width: 100%" @change="fetchMyImages" :disabled="!user">
                         <el-option v-for="tag in tags" :key="tag" :label="tag" :value="tag"></el-option>
                       </el-select>
                     </el-col>
@@ -201,6 +150,74 @@
         </el-row>
       </el-main>
     </el-container>
+
+    <el-dialog title="登录" v-model="loginDialogVisible" width="420px" :close-on-click-modal="false">
+      <p class="hint" style="margin-top: 0; margin-bottom: 12px;">{{ loginReason || '登录后可进行该操作' }}</p>
+      <el-form :model="loginForm" @submit.prevent="login" label-position="top">
+        <el-form-item label="用户名">
+          <el-input v-model="loginForm.username" autocomplete="username" placeholder="请输入用户名"></el-input>
+        </el-form-item>
+        <el-form-item label="密码">
+          <el-input v-model="loginForm.password" type="password" show-password autocomplete="current-password" placeholder="请输入密码"></el-input>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="loginDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="loginLoading" @click="login">登录</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+    <el-dialog title="管理员 · 用户管理" v-model="adminDialogVisible" width="960px" top="7vh">
+      <el-form :model="createUserForm" label-position="top">
+        <el-row :gutter="12">
+          <el-col :span="8">
+            <el-form-item label="新用户名">
+              <el-input v-model="createUserForm.username" placeholder="例如: alice"></el-input>
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="初始密码">
+              <el-input v-model="createUserForm.password" type="password" show-password></el-input>
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="邮箱（可选）">
+              <el-input v-model="createUserForm.email"></el-input>
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-button type="primary" :loading="adminLoading" @click="createUser">新增用户</el-button>
+      </el-form>
+      <div class="divider"></div>
+      <el-button plain size="small" @click="loadUsers" :loading="adminLoading">刷新用户列表</el-button>
+      <el-table :data="users" size="small" style="margin-top: 10px" max-height="420">
+        <el-table-column prop="username" label="用户名" min-width="120"></el-table-column>
+        <el-table-column label="角色" min-width="90">
+          <template #default="scope">
+            <el-tag :type="scope.row.is_admin ? 'danger' : 'info'" size="small">{{ scope.row.is_admin ? 'admin' : 'user' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="压缩策略" min-width="160">
+          <template #default="scope">
+            <el-tag :type="scope.row.compress_enabled ? 'success' : 'warning'" size="small">
+              {{ scope.row.compress_enabled ? ('开启 / Q' + scope.row.compress_quality) : '关闭' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="改密" min-width="130">
+          <template #default="scope">
+            <el-button size="small" @click="openPasswordDialog(scope.row)">修改密码</el-button>
+          </template>
+        </el-table-column>
+        <el-table-column label="压缩设置" min-width="120">
+          <template #default="scope">
+            <el-button size="small" type="primary" plain @click="openUploadSettingsDialog(scope.row)">设置</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
 
     <el-dialog title="修改用户密码" v-model="passwordDialogVisible" width="420px">
       <el-form :model="passwordForm" label-position="top">

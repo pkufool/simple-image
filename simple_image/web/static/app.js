@@ -19,6 +19,11 @@ createApp({
         username: "",
         password: "",
       },
+      loginDialogVisible: false,
+      loginReason: "",
+      pendingAction: "",
+
+      adminDialogVisible: false,
 
       createUserForm: {
         username: "",
@@ -52,6 +57,27 @@ createApp({
     };
   },
   methods: {
+    requestLogin(reason = "请先登录") {
+      this.loginReason = reason;
+      this.loginDialogVisible = true;
+    },
+
+    onTabClick(tab) {
+      const paneName = tab?.paneName || tab?.props?.name;
+      if (!this.user && (paneName === "upload" || paneName === "images")) {
+        this.pendingAction = paneName;
+        this.requestLogin(paneName === "upload" ? "上传图片需要登录" : "查看图片需要登录");
+      }
+    },
+
+    async openAdminDialog() {
+      if (!this.user || !this.user.is_admin) {
+        return;
+      }
+      this.adminDialogVisible = true;
+      await this.loadUsers();
+    },
+
     formatDate(value) {
       if (!value) {
         return "-";
@@ -132,8 +158,16 @@ createApp({
 
         this.user = res.data.user;
         this.loginForm.password = "";
+        this.loginDialogVisible = false;
         ElMessage.success("登录成功");
         await this.onAuthenticated();
+        if (this.pendingAction === "images") {
+          this.activeTab = "images";
+          await this.fetchMyImages();
+        } else if (this.pendingAction === "upload") {
+          this.activeTab = "upload";
+        }
+        this.pendingAction = "";
       } catch (error) {
         ElMessage.error(error?.response?.data?.detail || "登录失败");
       } finally {
@@ -148,6 +182,9 @@ createApp({
         // Ignore server-side logout error and always clear local auth state.
       } finally {
         this.user = null;
+        this.loginDialogVisible = false;
+        this.adminDialogVisible = false;
+        this.pendingAction = "";
         this.users = [];
         this.images = [];
         this.tags = [];
@@ -185,6 +222,10 @@ createApp({
     async fetchMyImages() {
       if (!this.user) {
         this.images = [];
+        if (this.activeTab === "images") {
+          this.pendingAction = "images";
+          this.requestLogin("查看图片需要登录");
+        }
         return;
       }
 
@@ -206,7 +247,8 @@ createApp({
 
     async uploadAll() {
       if (!this.user) {
-        ElMessage.warning("请先登录后上传");
+        this.pendingAction = "upload";
+        this.requestLogin("上传图片需要登录");
         return;
       }
       if (!this.uploadItems.length) {
