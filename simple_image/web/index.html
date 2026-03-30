@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Simple Image</title>
-  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+  <link rel="stylesheet" href="/static/vendor/element-plus.css" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
@@ -46,13 +46,14 @@
                     :auto-upload="false"
                     :on-change="onFileChange"
                     :on-remove="onFileRemove"
+                    :on-exceed="onUploadExceed"
                     :file-list="fileList"
-                    :limit="5"
+                    :limit="maxUploadCount"
                     accept="image/*"
                   >
                     <div class="el-upload__text">拖拽图片到此处，或<em>点击选择</em></div>
                     <template #tip>
-                      <div class="el-upload__tip">最多 5 张，每张建议不超过 5MB</div>
+                      <div class="el-upload__tip">最多 {{ maxUploadCount }} 张（超出仅保留前 {{ maxUploadCount }} 张），每张不超过 {{ maxFileSizeMB }}MB</div>
                     </template>
                   </el-upload>
 
@@ -80,14 +81,16 @@
                     上传已选图片
                   </el-button>
 
-                  <el-alert
-                    v-for="res in uploadResults"
-                    :key="res.id"
-                    :title="res.filename + ' 上传成功：' + res.url"
-                    type="success"
-                    :closable="false"
-                    style="margin-top:8px"
-                  ></el-alert>
+                  <div v-if="uploadResults.length" class="upload-result-list">
+                    <el-card v-for="res in uploadResults" :key="res.id" class="upload-result-card" shadow="never">
+                      <div class="upload-result-title">{{ res.filename }} 上传成功</div>
+                      <el-input :model-value="res.url" readonly>
+                        <template #append>
+                          <el-button @click="copyUploadUrl(res.url)">复制</el-button>
+                        </template>
+                      </el-input>
+                    </el-card>
+                  </div>
                 </el-tab-pane>
 
                 <el-tab-pane label="我的图片" name="images">
@@ -263,9 +266,9 @@
     </el-dialog>
   </div>
 
-  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  <script src="https://unpkg.com/element-plus/dist/index.full.min.js"></script>
-  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+  <script src="/static/vendor/vue.global.prod.js"></script>
+  <script src="/static/vendor/element-plus.full.min.js"></script>
+  <script src="/static/vendor/axios.min.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

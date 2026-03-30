@@ -3,6 +3,10 @@ const { ElMessage } = ElementPlus;
 
 axios.defaults.withCredentials = true;
 
+const MAX_UPLOAD_COUNT = 5;
+const MAX_FILE_SIZE_MB = 10;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+
 createApp({
   data() {
     return {
@@ -54,6 +58,9 @@ createApp({
       fileList: [],
       uploadItems: [],
       uploadResults: [],
+
+      maxUploadCount: MAX_UPLOAD_COUNT,
+      maxFileSizeMB: MAX_FILE_SIZE_MB,
     };
   },
   methods: {
@@ -107,13 +114,74 @@ createApp({
     },
 
     onFileChange(_file, latestFileList) {
-      this.fileList = latestFileList;
+      this.fileList = this.validateFileList(latestFileList);
       this.syncUploadItems();
     },
 
     onFileRemove(_file, latestFileList) {
-      this.fileList = latestFileList;
+      this.fileList = this.validateFileList(latestFileList, false);
       this.syncUploadItems();
+    },
+
+    onUploadExceed() {
+      ElMessage.error(`一次最多选择 ${this.maxUploadCount} 张图片`);
+    },
+
+    validateFileList(fileList, showMessage = true) {
+      const valid = [];
+      const oversizedNames = [];
+
+      for (const item of fileList || []) {
+        if (valid.length >= this.maxUploadCount) {
+          continue;
+        }
+        const raw = item?.raw;
+        if (!raw) {
+          continue;
+        }
+        if (raw.size > MAX_FILE_SIZE_BYTES) {
+          oversizedNames.push(raw.name || "未命名文件");
+          continue;
+        }
+        valid.push(item);
+      }
+
+      if (showMessage) {
+        if ((fileList || []).length > this.maxUploadCount) {
+          ElMessage.error(`一次最多选择 ${this.maxUploadCount} 张图片，已保留前 ${this.maxUploadCount} 张`);
+        }
+        if (oversizedNames.length) {
+          const shown = oversizedNames.slice(0, 2).join("、");
+          const suffix = oversizedNames.length > 2 ? " 等" : "";
+          ElMessage.error(`${shown}${suffix} 超过 ${this.maxFileSizeMB}MB，已移除`);
+        }
+      }
+
+      return valid;
+    },
+
+    async copyUploadUrl(url) {
+      if (!url) {
+        return;
+      }
+      try {
+        if (navigator?.clipboard?.writeText) {
+          await navigator.clipboard.writeText(url);
+        } else {
+          const textarea = document.createElement("textarea");
+          textarea.value = url;
+          textarea.setAttribute("readonly", "readonly");
+          textarea.style.position = "fixed";
+          textarea.style.left = "-9999px";
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textarea);
+        }
+        ElMessage.success("地址已复制");
+      } catch (_error) {
+        ElMessage.error("复制失败，请手动复制");
+      }
     },
 
     syncUploadItems() {
@@ -253,6 +321,16 @@ createApp({
       }
       if (!this.uploadItems.length) {
         ElMessage.warning("请先选择图片");
+        return;
+      }
+      if (this.uploadItems.length > this.maxUploadCount) {
+        ElMessage.error(`一次最多上传 ${this.maxUploadCount} 张图片`);
+        return;
+      }
+
+      const oversized = this.uploadItems.find((item) => item?.file?.size > MAX_FILE_SIZE_BYTES);
+      if (oversized) {
+        ElMessage.error(`存在超过 ${this.maxFileSizeMB}MB 的文件，请移除后再上传`);
         return;
       }
 

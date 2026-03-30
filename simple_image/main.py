@@ -193,7 +193,7 @@ def create_app(
     app.state.data_dir = base_data_dir
     app.state.images_dir = base_data_dir / "images"
     app.state.images_dir.mkdir(parents=True, exist_ok=True)
-    app.state.api_url = api_url or os.getenv("API_URL", "http://localhost:8000")
+    app.state.api_url = api_url or os.getenv("API_URL")
     app.state.admin_username = admin_username or os.getenv("ADMIN_USERNAME", "admin")
     app.state.admin_password = admin_password or os.getenv("ADMIN_PASSWORD", "admin123456")
     app.state.default_compress_quality = max(1, min(95, default_quality))
@@ -351,6 +351,7 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.post("/upload")
     def upload_image(
+        request: Request,
         file: UploadFile = File(...),
         tags: Optional[str] = Form(default=None),
         data: Optional[str] = Form(default=None),
@@ -428,10 +429,14 @@ def _register_routes(app: FastAPI) -> None:
         db.commit()
         db.refresh(db_image)
 
+        url_base = app.state.api_url
+        if not url_base:
+            url_base = str(request.base_url).rstrip("/")
+
         return {
             "id": db_image.id,
             "filename": db_image.filename,
-            "url": f"{app.state.api_url}/image/{db_image.id}",
+            "url": f"{url_base}/image/{db_image.id}",
             "message": upload_message,
         }
 
