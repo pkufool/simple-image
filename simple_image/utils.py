@@ -80,3 +80,28 @@ def compress_image(image_data, file_extension, quality=None):
     compressed_data = compressed_buffer.getvalue()
     compressed_size = len(compressed_data)
     return compressed_data, original_size, compressed_size
+
+
+def create_thumbnail(image_data: bytes, size: int = 160, quality: int = 75) -> bytes:
+    image = PILImage.open(BytesIO(image_data))
+    if image.mode not in ("RGB", "L"):
+        image = image.convert("RGB")
+
+    target_size = max(48, min(512, int(size)))
+    try:
+        resampling = PILImage.Resampling.LANCZOS
+    except AttributeError:
+        resampling = PILImage.LANCZOS
+
+    image.thumbnail((target_size, target_size), resample=resampling)
+
+    buffer = BytesIO()
+    save_quality = max(40, min(95, int(quality)))
+    image.save(
+        buffer,
+        format="JPEG",
+        quality=save_quality,
+        optimize=True,
+        progressive=True,
+    )
+    return buffer.getvalue()

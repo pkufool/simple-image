@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from dotenv import load_dotenv
-from fastapi import Cookie, Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile, status
+from fastapi import Cookie, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -15,7 +15,7 @@ from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from .models import Image, SessionToken, Tag, User, create_session_factory
-from .utils import compress_image, detect_image_extension, generate_uuid, generate_uuid_filename, normalize_image_extension
+from .utils import compress_image, create_thumbnail, detect_image_extension, generate_uuid, generate_uuid_filename, normalize_image_extension
 
 load_dotenv()
 
@@ -488,6 +488,35 @@ def _register_routes(app: FastAPI) -> None:
         return FileResponse(path=image_path, media_type=media_type)
 
 
+    @app.get("/thumbnail/{image_uuid}")
+    def get_thumbnail(
+        image_uuid: str,
+        size: int = Query(default=160, ge=48, le=512),
+        quality: int = Query(default=75, ge=40, le=95),
+        db: Session = Depends(get_db),
+    ):
+        db_image = db.query(Image).filter(Image.id == image_uuid).first()
+        if not db_image:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+
+        image_path = image_disk_path(app.state.images_dir, db_image.id, db_image.file_extension)
+        if not image_path.exists():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image file not found")
+
+        try:
+            with open(image_path, "rb") as source_file:
+                image_data = source_file.read()
+            thumbnail_data = create_thumbnail(image_data=image_data, size=size, quality=quality)
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Thumbnail generation error: {str(exc)}")
+
+        return Response(
+            content=thumbnail_data,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
+
     def list_user_images(
         owner_id: str,
         tag: Optional[str],
@@ -639,7 +668,7 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.get("/{full_path:path}", include_in_schema=False)
     def web_fallback(full_path: str):
-        if full_path.startswith(("auth/", "admin/", "image/", "images/", "upload", "tags/", "update-tags/", "delete-image/", "docs", "openapi.json", "redoc")):
+        if full_path.startswith(("auth/", "admin/", "image/", "thumbnail/", "images/", "upload", "tags/", "update-tags/", "delete-image/", "docs", "openapi.json", "redoc")):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
         index_file = WEB_DIR / "index.html"

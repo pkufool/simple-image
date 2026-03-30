@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Simple Image</title>
+  <title>简单图床</title>
   <link rel="stylesheet" href="static/vendor/element-plus.css" />
   <link rel="stylesheet" href="static/styles.css" />
 </head>
@@ -15,8 +15,8 @@
     <el-container class="shell">
       <el-header class="header">
         <div class="brand">
-          <h1>Simple Image</h1>
-          <p>FastAPI + Vue3 + Element Plus</p>
+          <h1>简单图床</h1>
+          <p>Simple Image</p>
         </div>
         <div class="header-actions">
           <el-tag v-if="user" type="success">{{ user.username }}<span v-if="user.is_admin"> (admin)</span></el-tag>
@@ -33,7 +33,6 @@
                 <el-tab-pane label="上传图片" name="upload">
                   <el-alert v-if="!user" title="上传图片需要登录" type="info" :closable="false" style="margin-bottom:12px">
                     <template #default>
-                      上传图片需要登录。
                       <el-button text type="primary" @click="requestLogin('上传图片')">去登录</el-button>
                     </template>
                   </el-alert>
@@ -83,12 +82,26 @@
 
                   <div v-if="uploadResults.length" class="upload-result-list">
                     <el-card v-for="res in uploadResults" :key="res.id" class="upload-result-card" shadow="never">
-                      <div class="upload-result-title">{{ res.filename }} 上传成功</div>
-                      <el-input :model-value="res.url" readonly>
-                        <template #append>
-                          <el-button @click="copyUploadUrl(res.url)">复制</el-button>
-                        </template>
-                      </el-input>
+                      <div class="upload-result-row">
+                        <a :href="imageUrl(res.id)" target="_blank" rel="noopener">
+                          <lazy-thumb
+                            wrapper-class="upload-result-thumb"
+                            :src="thumbnailUrl(res.id, 144)"
+                            :alt="res.filename"
+                          ></lazy-thumb>
+                        </a>
+                        <div class="upload-result-main">
+                          <div class="upload-result-title">{{ res.filename }} 上传成功</div>
+                          <div class="upload-result-filename">原文件名：{{ res.filename }}</div>
+                          <div class="upload-result-link-row">
+                            <a class="upload-result-link" :href="imageUrl(res.id)" target="_blank" rel="noopener">{{ imageUrl(res.id) }}</a>
+                            <el-button size="small" @click="copyText(imageUrl(res.id))">复制</el-button>
+                          </div>
+                          <div class="upload-result-tags" v-if="res.tags && res.tags.length">
+                            <el-tag v-for="tag in res.tags" :key="tag" size="small" effect="plain">{{ tag }}</el-tag>
+                          </div>
+                        </div>
+                      </div>
                     </el-card>
                   </div>
                 </el-tab-pane>
@@ -113,39 +126,63 @@
                   </el-row>
 
                   <el-empty v-if="!imagesLoading && !images.length" description="暂无图片"></el-empty>
-                  <div class="image-grid">
-                    <el-card v-for="img in images" :key="img.id" class="image-card" shadow="never">
-                      <img class="image-thumb" :src="apiBase + '/image/' + img.id" :alt="img.filename" />
-                      <div class="image-content">
-                        <h4>{{ img.filename }}</h4>
-                        <p>上传时间：{{ formatDate(img.upload_time) }}</p>
-                        <p>链接：<a :href="apiBase + '/image/' + img.id" target="_blank">{{ apiBase + '/image/' + img.id }}</a></p>
-                        <p>
-                          压缩：{{ formatSize(img.original_size) }} → {{ formatSize(img.compressed_size) }}
-                          （节省 {{ savePercent(img) }}%）
-                        </p>
-                        <el-select
-                          v-model="img._editTags"
-                          multiple
-                          filterable
-                          allow-create
-                          default-first-option
-                          placeholder="编辑标签"
-                          style="width:100%"
-                        >
-                          <el-option v-for="tag in tags" :key="tag" :label="tag" :value="tag"></el-option>
-                        </el-select>
-                        <div class="card-actions">
-                          <el-button size="small" @click="updateTags(img)">更新标签</el-button>
-                          <el-popconfirm title="确认删除该图片？" @confirm="deleteImage(img)">
-                            <template #reference>
-                              <el-button size="small" type="danger" plain>删除</el-button>
-                            </template>
-                          </el-popconfirm>
-                        </div>
+                  <el-collapse v-if="monthGroups.length" v-model="activeMonthGroups" class="month-collapse">
+                    <el-collapse-item
+                      v-for="group in monthGroups"
+                      :key="group.key"
+                      :name="group.key"
+                    >
+                      <template #title>
+                        <span class="month-group-title">{{ group.label }}（{{ group.items.length }}）</span>
+                      </template>
+
+                      <div class="image-row-list">
+                        <el-card v-for="img in group.items" :key="img.id" class="image-row-card" shadow="never">
+                          <div class="image-row">
+                            <a :href="imageUrl(img.id)" target="_blank" rel="noopener">
+                              <lazy-thumb
+                                wrapper-class="image-row-thumb"
+                                :src="thumbnailUrl(img.id, 160)"
+                                :alt="img.filename"
+                              ></lazy-thumb>
+                            </a>
+                            <div class="image-row-content">
+                              <h4>{{ img.filename }}</h4>
+                              <p>上传时间：{{ formatDate(img.upload_time) }}</p>
+                              <div class="image-link-row">
+                                <span class="image-link-label">链接：</span>
+                                <a :href="imageUrl(img.id)" target="_blank" rel="noopener">{{ imageUrl(img.id) }}</a>
+                                <el-button size="small" @click="copyText(imageUrl(img.id))">复制</el-button>
+                              </div>
+                              <p>
+                                压缩：{{ formatSize(img.original_size) }} → {{ formatSize(img.compressed_size) }}
+                                （节省 {{ savePercent(img) }}%）
+                              </p>
+                              <el-select
+                                v-model="img._editTags"
+                                multiple
+                                filterable
+                                allow-create
+                                default-first-option
+                                placeholder="编辑标签"
+                                style="width:100%"
+                              >
+                                <el-option v-for="tag in tags" :key="tag" :label="tag" :value="tag"></el-option>
+                              </el-select>
+                              <div class="card-actions">
+                                <el-button size="small" @click="updateTags(img)">更新标签</el-button>
+                                <el-popconfirm title="确认删除该图片？" @confirm="deleteImage(img)">
+                                  <template #reference>
+                                    <el-button size="small" type="danger" plain>删除</el-button>
+                                  </template>
+                                </el-popconfirm>
+                              </div>
+                            </div>
+                          </div>
+                        </el-card>
                       </div>
-                    </el-card>
-                  </div>
+                    </el-collapse-item>
+                  </el-collapse>
                 </el-tab-pane>
               </el-tabs>
             </el-card>

@@ -15,7 +15,97 @@ const MAX_UPLOAD_COUNT = 5;
 const MAX_FILE_SIZE_MB = 10;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
-createApp({
+const LazyThumb = {
+  props: {
+    src: {
+      type: String,
+      required: true,
+    },
+    alt: {
+      type: String,
+      default: "thumbnail",
+    },
+    wrapperClass: {
+      type: String,
+      default: "",
+    },
+  },
+  data() {
+    return {
+      loaded: false,
+      shouldLoad: false,
+      observer: null,
+    };
+  },
+  computed: {
+    resolvedSrc() {
+      return this.shouldLoad ? this.src : "";
+    },
+    canObserve() {
+      return typeof window !== "undefined" && "IntersectionObserver" in window;
+    },
+  },
+  watch: {
+    src() {
+      this.loaded = false;
+      if (!this.canObserve) {
+        this.shouldLoad = true;
+      }
+    },
+  },
+  mounted() {
+    if (!this.canObserve) {
+      this.shouldLoad = true;
+      return;
+    }
+
+    this.observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry && entry.isIntersecting) {
+          this.shouldLoad = true;
+          this.disconnectObserver();
+        }
+      },
+      { rootMargin: "120px 0px" }
+    );
+    this.observer.observe(this.$el);
+  },
+  beforeUnmount() {
+    this.disconnectObserver();
+  },
+  methods: {
+    disconnectObserver() {
+      if (this.observer) {
+        this.observer.disconnect();
+        this.observer = null;
+      }
+    },
+    handleLoad() {
+      this.loaded = true;
+    },
+    handleError() {
+      this.loaded = true;
+    },
+  },
+  template: `
+    <div class="thumb-shell" :class="wrapperClass">
+      <div v-if="!loaded" class="thumb-skeleton"></div>
+      <img
+        class="thumb-image"
+        :src="resolvedSrc"
+        :alt="alt"
+        loading="lazy"
+        decoding="async"
+        @load="handleLoad"
+        @error="handleError"
+        :style="{ opacity: loaded ? 1 : 0 }"
+      />
+    </div>
+  `,
+};
+
+const app = createApp({
   data() {
     return {
       apiBase: resolveApiBasePath(),
@@ -61,6 +151,8 @@ createApp({
       users: [],
       tags: [],
       images: [],
+      monthGroups: [],
+      activeMonthGroups: [],
       imageFilterTag: "",
 
       fileList: [],
@@ -168,16 +260,43 @@ createApp({
       return valid;
     },
 
-    async copyUploadUrl(url) {
-      if (!url) {
+    imageUrl(imageId) {
+      return `${this.apiBase}/image/${imageId}`;
+    },
+
+    thumbnailUrl(imageId, size = 160) {
+      return `${this.apiBase}/thumbnail/${imageId}?size=${size}`;
+    },
+
+    buildMonthGroups(items) {
+      const groupMap = new Map();
+      for (const img of items || []) {
+        const date = new Date(img.upload_time);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const key = `${year}-${month}`;
+        if (!groupMap.has(key)) {
+          groupMap.set(key, {
+            key,
+            label: `${year}年${month}月`,
+            items: [],
+          });
+        }
+        groupMap.get(key).items.push(img);
+      }
+      return Array.from(groupMap.values());
+    },
+
+    async copyText(text) {
+      if (!text) {
         return;
       }
       try {
         if (navigator?.clipboard?.writeText) {
-          await navigator.clipboard.writeText(url);
+          await navigator.clipboard.writeText(text);
         } else {
           const textarea = document.createElement("textarea");
-          textarea.value = url;
+          textarea.value = text;
           textarea.setAttribute("readonly", "readonly");
           textarea.style.position = "fixed";
           textarea.style.left = "-9999px";
@@ -263,6 +382,8 @@ createApp({
         this.pendingAction = "";
         this.users = [];
         this.images = [];
+        this.monthGroups = [];
+        this.activeMonthGroups = [];
         this.tags = [];
         this.uploadResults = [];
         ElMessage.success("已退出登录");
@@ -298,6 +419,8 @@ createApp({
     async fetchMyImages() {
       if (!this.user) {
         this.images = [];
+        this.monthGroups = [];
+        this.activeMonthGroups = [];
         if (this.activeTab === "images") {
           this.pendingAction = "images";
           this.requestLogin("查看图片需要登录");
@@ -310,10 +433,16 @@ createApp({
         const res = await axios.get(`${this.apiBase}/images/me`, {
           params: this.imageFilterTag ? { tag: this.imageFilterTag } : {},
         });
-        this.images = (res.data || []).map((img) => ({
+        const sortedImages = (res.data || [])
+          .slice()
+          .sort((a, b) => new Date(b.upload_time).getTime() - new Date(a.upload_time).getTime())
+          .map((img) => ({
           ...img,
           _editTags: Array.isArray(img.tags) ? [...img.tags] : [],
         }));
+        this.images = sortedImages;
+        this.monthGroups = this.buildMonthGroups(sortedImages);
+        this.activeMonthGroups = this.monthGroups.map((group) => group.key);
       } catch (error) {
         ElMessage.error(error?.response?.data?.detail || "获取图片列表失败");
       } finally {
@@ -355,7 +484,10 @@ createApp({
               "Content-Type": "multipart/form-data",
             },
           });
-          this.uploadResults.push(res.data);
+          this.uploadResults.push({
+            ...res.data,
+            tags: item.tags || [],
+          });
         }
 
         this.fileList = [];
@@ -531,4 +663,7 @@ createApp({
   beforeUnmount() {
     this.cleanupObjectUrls();
   },
-}).use(ElementPlus).mount("#app");
+});
+
+app.component("lazy-thumb", LazyThumb);
+app.use(ElementPlus).mount("#app");
