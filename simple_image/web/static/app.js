@@ -3,6 +3,14 @@ const { ElMessage } = ElementPlus;
 
 axios.defaults.withCredentials = true;
 
+function resolveApiBasePath() {
+  const pathname = new URL(".", window.location.href).pathname;
+  if (pathname === "/") {
+    return "";
+  }
+  return pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+}
+
 const MAX_UPLOAD_COUNT = 5;
 const MAX_FILE_SIZE_MB = 10;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -10,7 +18,7 @@ const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 createApp({
   data() {
     return {
-      apiBase: window.location.origin,
+      apiBase: resolveApiBasePath(),
       user: null,
 
       activeTab: "upload",

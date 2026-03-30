@@ -15,12 +15,18 @@ from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from .models import Image, SessionToken, Tag, User, create_session_factory
-from .utils import compress_image, generate_uuid, generate_uuid_filename
+from .utils import compress_image, detect_image_extension, generate_uuid, generate_uuid_filename, normalize_image_extension
 
 load_dotenv()
 
 WEB_DIR = Path(__file__).parent / "web"
-ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
+ALLOWED_EXTENSIONS = {"jpg", "jpeg", "jpe", "jfif", "png", "gif", "webp"}
+IMAGE_MEDIA_TYPES = {
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "gif": "image/gif",
+    "webp": "image/webp",
+}
 DEFAULT_COMPRESS_QUALITY = 25
 SESSION_COOKIE_NAME = "simple_image_session"
 
@@ -102,6 +108,28 @@ def parse_tags(tags: List[str]) -> List[str]:
 
 def image_disk_path(images_dir: Path, image_id: str, extension: str) -> Path:
     return images_dir / f"{generate_uuid_filename(image_id)}.{extension}"
+
+
+def normalize_path_prefix(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    prefix = value.strip()
+    if not prefix:
+        return ""
+    if not prefix.startswith("/"):
+        prefix = f"/{prefix}"
+    return prefix.rstrip("/")
+
+
+def get_public_base_url(request: Request, app: FastAPI) -> str:
+    # API_URL has the highest priority when explicitly configured.
+    configured = (app.state.api_url or "").rstrip("/")
+    if configured:
+        return configured
+
+    forwarded_prefix = normalize_path_prefix(request.headers.get("x-forwarded-prefix"))
+    request_base = str(request.base_url).rstrip("/")
+    return f"{request_base}{forwarded_prefix}"
 
 
 def to_user_public(user: User) -> UserPublic:
@@ -358,7 +386,16 @@ def _register_routes(app: FastAPI) -> None:
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user),
     ):
-        extension = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "jpg"
+        image_data = file.file.read()
+        if not image_data:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty image file")
+
+        try:
+            detected_extension = detect_image_extension(image_data)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+        extension = normalize_image_extension(detected_extension)
         if extension not in ALLOWED_EXTENSIONS:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported image type")
 
@@ -382,7 +419,6 @@ def _register_routes(app: FastAPI) -> None:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid tags payload")
 
         try:
-            image_data = file.file.read()
             original_size = len(image_data)
             if current_user.compress_enabled:
                 compressed_data, _, compressed_size = compress_image(
@@ -429,9 +465,7 @@ def _register_routes(app: FastAPI) -> None:
         db.commit()
         db.refresh(db_image)
 
-        url_base = app.state.api_url
-        if not url_base:
-            url_base = str(request.base_url).rstrip("/")
+        url_base = get_public_base_url(request, app)
 
         return {
             "id": db_image.id,
@@ -450,7 +484,8 @@ def _register_routes(app: FastAPI) -> None:
         image_path = image_disk_path(app.state.images_dir, db_image.id, db_image.file_extension)
         if not image_path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image file not found")
-        return FileResponse(path=image_path)
+        media_type = IMAGE_MEDIA_TYPES.get(normalize_image_extension(db_image.file_extension), "application/octet-stream")
+        return FileResponse(path=image_path, media_type=media_type)
 
 
     def list_user_images(

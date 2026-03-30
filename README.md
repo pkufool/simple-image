@@ -72,6 +72,92 @@ simple-image serve ./runtime-data \
 - `SESSION_COOKIE_PATH`：默认 `/`
 - `SESSION_MAX_AGE`：默认 `604800`（7 天）
 
+## Nginx 反向代理（部署到 /simple_image）
+
+当前前端已经支持原生子路径部署，不需要再使用 `sub_filter`。
+
+推荐将服务运行在 `127.0.0.1:8000`，并用 Nginx 挂载到 `/simple_image`：
+
+```nginx
+upstream simple_image_backend {
+  server 127.0.0.1:8000;
+  keepalive 32;
+}
+
+server {
+  listen 80;
+  server_name your.domain.com;
+
+  # 统一到带尾斜杠的入口，保证相对静态资源路径稳定
+  location = /simple_image {
+    return 301 /simple_image/;
+  }
+
+  # 静态资源：长期缓存（文件有版本变化时会换 URL）
+  location ^~ /simple_image/static/ {
+    proxy_pass http://simple_image_backend/static/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    expires 30d;
+    add_header Cache-Control "public, max-age=2592000, immutable";
+  }
+
+  # 图片访问：短到中等缓存，兼顾更新可见性
+  location ^~ /simple_image/image/ {
+    proxy_pass http://simple_image_backend/image/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    expires 1d;
+    add_header Cache-Control "public, max-age=86400";
+  }
+
+  # 其余 API + 前端入口
+  location /simple_image/ {
+    proxy_pass http://simple_image_backend/;
+    proxy_http_version 1.1;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Prefix /simple_image;
+
+    client_max_body_size 20m;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+
+    # HTML 与 API 响应不建议长期缓存
+    expires -1;
+    add_header Cache-Control "no-store";
+  }
+
+  # gzip（对文本类资源压缩，对图片无需重复压缩）
+  gzip on;
+  gzip_comp_level 5;
+  gzip_min_length 1024;
+  gzip_vary on;
+  gzip_proxied any;
+  gzip_types
+    text/plain
+    text/css
+    text/javascript
+    application/javascript
+    application/json
+    application/xml
+    image/svg+xml;
+}
+```
+
+### 子路径部署建议
+
+- 建议设置 `API_URL=https://your.domain.com/simple_image`，用于后端返回完整图片 URL。
+- 建议设置 `SESSION_COOKIE_PATH=/simple_image`，避免 Cookie 暴露到站点其他路径。
+- 若站点启用 HTTPS，建议设置 `SESSION_COOKIE_SECURE=true`。
+- 如果图片更大或压缩耗时更高，按需增加 `client_max_body_size` 与 `proxy_read_timeout`。
+- 发布后可先执行 `nginx -t`，再 `nginx -s reload`。
+
 ## 直接用 uvicorn 启动
 
 ```bash
