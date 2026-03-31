@@ -8,6 +8,137 @@
   --brand: #2e7dff;
 }
 
+[v-cloak] {
+  display: none !important;
+}
+
+#app-boot {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  justify-content: center;
+  padding: 22px 12px;
+  background: radial-gradient(circle at 15% 20%, #fff7ef, transparent 48%),
+              radial-gradient(circle at 85% 5%, #e8fff7, transparent 35%),
+              linear-gradient(160deg, #f3f7ff, #f7fbff);
+  transition: opacity 0.2s ease;
+}
+
+#app-boot.done {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.boot-shell {
+  width: 100%;
+  max-width: 1200px;
+}
+
+.boot-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 0 10px;
+}
+
+.boot-brand {
+  width: 220px;
+}
+
+.boot-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.boot-line,
+.boot-pill,
+.boot-tab,
+.boot-block,
+.boot-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #eaf0f9;
+}
+
+.boot-line::after,
+.boot-pill::after,
+.boot-tab::after,
+.boot-block::after,
+.boot-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8), transparent);
+  animation: bootShimmer 1.4s infinite;
+}
+
+.boot-line-title {
+  width: 160px;
+  height: 24px;
+  margin-bottom: 8px;
+}
+
+.boot-line-sub {
+  width: 110px;
+  height: 14px;
+}
+
+.boot-pill {
+  width: 74px;
+  height: 30px;
+  border-radius: 20px;
+}
+
+.boot-panel {
+  border: 1px solid rgba(23, 28, 45, 0.08);
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(8px);
+}
+
+.boot-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.boot-tab {
+  width: 110px;
+  height: 34px;
+  border-radius: 8px;
+}
+
+.boot-tab.active {
+  background: #dfe8f7;
+}
+
+.boot-block {
+  width: 100%;
+  height: 120px;
+  margin-bottom: 12px;
+}
+
+.boot-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.boot-card {
+  height: 92px;
+}
+
+@keyframes bootShimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -355,6 +486,21 @@ body {
 }
 
 @media (max-width: 900px) {
+  .boot-header {
+    padding: 0;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .boot-brand {
+    width: 100%;
+  }
+
+  .boot-grid {
+    grid-template-columns: 1fr;
+  }
+
   .shell {
     max-width: 100%;
   }

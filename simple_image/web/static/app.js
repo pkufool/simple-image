@@ -958,6 +958,13 @@ const app = createApp({
   },
   async mounted() {
     await this.init();
+    const boot = document.getElementById("app-boot");
+    if (boot) {
+      boot.classList.add("done");
+      window.setTimeout(() => {
+        boot.remove();
+      }, 220);
+    }
   },
   beforeUnmount() {
     this.cleanupObjectUrls();
