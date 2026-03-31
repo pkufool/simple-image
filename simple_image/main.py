@@ -76,6 +76,13 @@ class ImageInfo(BaseModel):
     compressed_size: int
 
 
+class ImagePage(BaseModel):
+    items: List[ImageInfo]
+    total: int
+    page: int
+    page_size: int
+
+
 class TagUpdate(BaseModel):
     tags: List[str]
 
@@ -562,6 +569,36 @@ def _register_routes(app: FastAPI) -> None:
         ]
 
 
+    def list_user_images_page(
+        owner_id: str,
+        tag: Optional[str],
+        page: int,
+        page_size: int,
+        db: Session,
+    ) -> ImagePage:
+        query = db.query(Image).filter(Image.owner_id == owner_id)
+        if tag:
+            query = query.join(Image.tags).filter(and_(Tag.name == tag, Tag.owner_id == owner_id))
+
+        total = query.count()
+        offset = (page - 1) * page_size
+        images = query.order_by(Image.upload_time.desc()).offset(offset).limit(page_size).all()
+        items = [
+            ImageInfo(
+                id=img.id,
+                filename=img.filename,
+                file_extension=img.file_extension,
+                upload_time=img.upload_time,
+                tags=[t.name for t in img.tags],
+                owner_id=img.owner_id,
+                original_size=img.original_size,
+                compressed_size=img.compressed_size,
+            )
+            for img in images
+        ]
+        return ImagePage(items=items, total=total, page=page, page_size=page_size)
+
+
     @app.get("/images/me", response_model=List[ImageInfo])
     def get_my_images(
         tag: Optional[str] = None,
@@ -569,6 +606,17 @@ def _register_routes(app: FastAPI) -> None:
         current_user: User = Depends(get_current_user),
     ):
         return list_user_images(current_user.id, tag, db)
+
+
+    @app.get("/images/me/page", response_model=ImagePage)
+    def get_my_images_page(
+        tag: Optional[str] = None,
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=20, ge=1, le=100),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+    ):
+        return list_user_images_page(current_user.id, tag, page, page_size, db)
 
 
     @app.get("/images/{user_id}", response_model=List[ImageInfo])
@@ -581,6 +629,20 @@ def _register_routes(app: FastAPI) -> None:
         if user_id != current_user.id and not current_user.is_admin:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
         return list_user_images(user_id, tag, db)
+
+
+    @app.get("/images/{user_id}/page", response_model=ImagePage)
+    def get_user_images_page(
+        user_id: str,
+        tag: Optional[str] = None,
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=20, ge=1, le=100),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+    ):
+        if user_id != current_user.id and not current_user.is_admin:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+        return list_user_images_page(user_id, tag, page, page_size, db)
 
 
     @app.get("/tags/me")

@@ -116,7 +116,7 @@
 
                   <el-row :gutter="8" style="margin-bottom: 12px;">
                     <el-col :span="18">
-                      <el-select v-model="imageFilterTag" clearable filterable :placeholder="t('filterByTag')" style="width: 100%" @change="fetchMyImages" :disabled="!user">
+                      <el-select v-model="imageFilterTag" clearable filterable :placeholder="t('filterByTag')" style="width: 100%" @change="onImageFilterChange" :disabled="!user">
                         <el-option v-for="tag in tags" :key="tag" :label="tag" :value="tag"></el-option>
                       </el-select>
                     </el-col>
@@ -183,6 +183,18 @@
                       </div>
                     </el-collapse-item>
                   </el-collapse>
+                  <div v-if="imageTotal > imagePageSize" class="image-pagination-wrap">
+                    <el-pagination
+                      background
+                      layout="total, prev, pager, next"
+                      :total="imageTotal"
+                      :current-page="imagePage"
+                      :page-size="imagePageSize"
+                      :pager-count="7"
+                      :disabled="imagesLoading"
+                      @current-change="onImagePageChange"
+                    ></el-pagination>
+                  </div>
                 </el-tab-pane>
               </el-tabs>
             </el-card>

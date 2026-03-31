@@ -38,6 +38,7 @@ const I18N_MESSAGES = {
     filterByTag: "按标签筛选",
     refreshAction: "刷新",
     emptyImages: "暂无图片",
+    pageTotal: "共 {total} 条",
     monthTitle: "{label}（{count}）",
     uploadTimeLabel: "上传时间：{time}",
     linkLabel: "链接：",
@@ -137,6 +138,7 @@ const I18N_MESSAGES = {
     filterByTag: "Filter by tag",
     refreshAction: "Refresh",
     emptyImages: "No images",
+    pageTotal: "Total {total}",
     monthTitle: "{label} ({count})",
     uploadTimeLabel: "Uploaded at: {time}",
     linkLabel: "Link:",
@@ -372,6 +374,9 @@ const app = createApp({
       monthGroups: [],
       activeMonthGroups: [],
       imageFilterTag: "",
+      imagePage: 1,
+      imagePageSize: 20,
+      imageTotal: 0,
 
       fileList: [],
       uploadItems: [],
@@ -417,6 +422,16 @@ const app = createApp({
 
     requestImagesLogin() {
       this.requestLogin(this.t("needLoginImages"));
+    },
+
+    onImageFilterChange() {
+      this.imagePage = 1;
+      this.fetchMyImages();
+    },
+
+    onImagePageChange(page) {
+      this.imagePage = page;
+      this.fetchMyImages();
     },
 
     onTabClick(tab) {
@@ -675,6 +690,8 @@ const app = createApp({
         this.images = [];
         this.monthGroups = [];
         this.activeMonthGroups = [];
+        this.imageTotal = 0;
+        this.imagePage = 1;
         if (this.activeTab === "images") {
           this.pendingAction = "images";
           this.requestImagesLogin();
@@ -684,17 +701,31 @@ const app = createApp({
 
       this.imagesLoading = true;
       try {
-        const res = await axios.get(`${this.apiBase}/images/me`, {
-          params: this.imageFilterTag ? { tag: this.imageFilterTag } : {},
+        const res = await axios.get(`${this.apiBase}/images/me/page`, {
+          params: {
+            ...(this.imageFilterTag ? { tag: this.imageFilterTag } : {}),
+            page: this.imagePage,
+            page_size: this.imagePageSize,
+          },
         });
-        const sortedImages = (res.data || [])
+        const items = res?.data?.items || [];
+        const total = Number(res?.data?.total || 0);
+        const sortedImages = items
           .slice()
           .sort((a, b) => new Date(b.upload_time).getTime() - new Date(a.upload_time).getTime())
           .map((img) => ({
           ...img,
           _editTags: Array.isArray(img.tags) ? [...img.tags] : [],
         }));
+
+        if (!sortedImages.length && total > 0 && this.imagePage > 1) {
+          this.imagePage -= 1;
+          await this.fetchMyImages();
+          return;
+        }
+
         this.images = sortedImages;
+        this.imageTotal = total;
         this.monthGroups = this.buildMonthGroups(sortedImages);
         this.activeMonthGroups = this.monthGroups.map((group) => group.key);
       } catch (error) {

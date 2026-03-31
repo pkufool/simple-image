@@ -267,6 +267,12 @@ body {
   border-top: 1px solid var(--line);
 }
 
+.image-pagination-wrap {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .month-group-title {
   font-weight: 600;
   color: var(--text);
@@ -378,5 +384,9 @@ body {
   .image-link-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .image-pagination-wrap {
+    justify-content: center;
   }
 }
