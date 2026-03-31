@@ -15,6 +15,14 @@ const MAX_UPLOAD_COUNT = 5;
 const MAX_FILE_SIZE_MB = 10;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
+function toAbsoluteUrl(input) {
+  try {
+    return new URL(input, window.location.origin).href;
+  } catch (_error) {
+    return input;
+  }
+}
+
 const LazyThumb = {
   props: {
     src: {
@@ -261,11 +269,15 @@ const app = createApp({
     },
 
     imageUrl(imageId) {
-      return `${this.apiBase}/image/${imageId}`;
+      return toAbsoluteUrl(`${this.apiBase}/image/${imageId}`);
     },
 
     thumbnailUrl(imageId, size = 160) {
-      return `${this.apiBase}/thumbnail/${imageId}?size=${size}`;
+      return toAbsoluteUrl(`${this.apiBase}/thumbnail/${imageId}?size=${size}`);
+    },
+
+    downloadUrl(imageId) {
+      return toAbsoluteUrl(`${this.apiBase}/download/${imageId}`);
     },
 
     buildMonthGroups(items) {
@@ -531,6 +543,19 @@ const app = createApp({
       } catch (error) {
         ElMessage.error(error?.response?.data?.detail || "删除失败");
       }
+    },
+
+    downloadImage(img) {
+      if (!img?.id) {
+        return;
+      }
+      const anchor = document.createElement("a");
+      anchor.href = this.downloadUrl(img.id);
+      anchor.rel = "noopener";
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
     },
 
     async loadUsers() {

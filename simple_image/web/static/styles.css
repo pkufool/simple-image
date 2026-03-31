@@ -331,6 +331,23 @@ body {
   font-size: 13px;
 }
 
+.tag-edit-row {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.tag-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.tag-edit-row .el-button {
+  flex: 0 0 auto;
+}
+
 @media (max-width: 900px) {
   .shell {
     max-width: 100%;

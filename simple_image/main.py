@@ -488,6 +488,26 @@ def _register_routes(app: FastAPI) -> None:
         return FileResponse(path=image_path, media_type=media_type)
 
 
+    @app.get("/download/{image_uuid}")
+    def download_image(
+        image_uuid: str,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+    ):
+        db_image = db.query(Image).filter(Image.id == image_uuid).first()
+        if not db_image:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+        if db_image.owner_id != current_user.id and not current_user.is_admin:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No permission to download this image")
+
+        image_path = image_disk_path(app.state.images_dir, db_image.id, db_image.file_extension)
+        if not image_path.exists():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image file not found")
+
+        media_type = IMAGE_MEDIA_TYPES.get(normalize_image_extension(db_image.file_extension), "application/octet-stream")
+        return FileResponse(path=image_path, media_type=media_type, filename=db_image.filename)
+
+
     @app.get("/thumbnail/{image_uuid}")
     def get_thumbnail(
         image_uuid: str,

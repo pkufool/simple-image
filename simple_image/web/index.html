@@ -152,30 +152,31 @@
                               <div class="image-link-row">
                                 <span class="image-link-label">链接：</span>
                                 <a :href="imageUrl(img.id)" target="_blank" rel="noopener">{{ imageUrl(img.id) }}</a>
-                                <el-button size="small" @click="copyText(imageUrl(img.id))">复制</el-button>
-                              </div>
-                              <p>
-                                压缩：{{ formatSize(img.original_size) }} → {{ formatSize(img.compressed_size) }}
-                                （节省 {{ savePercent(img) }}%）
-                              </p>
-                              <el-select
-                                v-model="img._editTags"
-                                multiple
-                                filterable
-                                allow-create
-                                default-first-option
-                                placeholder="编辑标签"
-                                style="width:100%"
-                              >
-                                <el-option v-for="tag in tags" :key="tag" :label="tag" :value="tag"></el-option>
-                              </el-select>
-                              <div class="card-actions">
-                                <el-button size="small" @click="updateTags(img)">更新标签</el-button>
+                                <el-button size="small" @click="copyText(imageUrl(img.id))">复制链接</el-button>
+                                <el-button size="small" type="primary" plain @click="downloadImage(img)">下载</el-button>
                                 <el-popconfirm title="确认删除该图片？" @confirm="deleteImage(img)">
                                   <template #reference>
                                     <el-button size="small" type="danger" plain>删除</el-button>
                                   </template>
                                 </el-popconfirm>
+                              </div>
+                              <p>
+                                压缩：{{ formatSize(img.original_size) }} → {{ formatSize(img.compressed_size) }}
+                                （节省 {{ savePercent(img) }}%）
+                              </p>
+                              <div class="tag-edit-row">
+                                <el-select
+                                  v-model="img._editTags"
+                                  multiple
+                                  filterable
+                                  allow-create
+                                  default-first-option
+                                  placeholder="编辑标签"
+                                  class="tag-select"
+                                >
+                                  <el-option v-for="tag in tags" :key="tag" :label="tag" :value="tag"></el-option>
+                                </el-select>
+                                <el-button size="small" @click="updateTags(img)">更新标签</el-button>
                               </div>
                             </div>
                           </div>
