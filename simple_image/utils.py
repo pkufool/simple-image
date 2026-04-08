@@ -1,8 +1,16 @@
 import os
 import uuid
-from PIL import Image as PILImage
+from PIL import Image as PILImage, ImageOps
 from io import BytesIO
 from dotenv import load_dotenv
+
+try:
+    import pillow_heif
+
+    pillow_heif.register_heif_opener()
+    HEIF_SUPPORT_ENABLED = True
+except Exception:
+    HEIF_SUPPORT_ENABLED = False
 
 load_dotenv()
 COMPRESS_QUALITY = int(os.getenv("IMAGE_COMPRESS_QUALITY", 25))
@@ -11,6 +19,8 @@ IMAGE_EXTENSION_ALIASES = {
     "jpg": "jpeg",
     "jpe": "jpeg",
     "jfif": "jpeg",
+    "heic": "jpeg",
+    "heif": "jpeg",
 }
 
 IMAGE_FORMAT_MAP = {
@@ -25,7 +35,39 @@ FORMAT_EXTENSION_MAP = {
     "PNG": "png",
     "GIF": "gif",
     "WEBP": "webp",
+    "HEIC": "heic",
+    "HEIF": "heif",
 }
+
+HEIF_FILE_SIGNATURES = (
+    b"ftypheic",
+    b"ftypheix",
+    b"ftyphevc",
+    b"ftyphevx",
+    b"ftypmif1",
+    b"ftypmsf1",
+)
+
+
+def _looks_like_heif(image_data: bytes) -> bool:
+    probe = image_data[:64]
+    return any(signature in probe for signature in HEIF_FILE_SIGNATURES)
+
+
+def _open_image(image_data: bytes):
+    try:
+        image = PILImage.open(BytesIO(image_data))
+        image.load()
+        return image
+    except Exception as exc:
+        if _looks_like_heif(image_data) and not HEIF_SUPPORT_ENABLED:
+            raise ValueError("HEIC/HEIF support is not available on server") from exc
+        raise ValueError("Invalid image file") from exc
+
+
+def _normalize_image_for_processing(image):
+    # Normalize orientation using EXIF so saved output keeps the expected direction.
+    return ImageOps.exif_transpose(image)
 
 def generate_uuid():
     return uuid.uuid1().hex
@@ -40,11 +82,8 @@ def normalize_image_extension(file_extension: str) -> str:
 
 
 def detect_image_extension(image_data: bytes) -> str:
-    try:
-        image = PILImage.open(BytesIO(image_data))
-        image_format = (image.format or "").upper()
-    except Exception as exc:
-        raise ValueError("Invalid image file") from exc
+    image = _open_image(image_data)
+    image_format = (image.format or "").upper()
 
     extension = FORMAT_EXTENSION_MAP.get(image_format)
     if not extension:
@@ -53,7 +92,7 @@ def detect_image_extension(image_data: bytes) -> str:
 
 def compress_image(image_data, file_extension, quality=None):
     original_size = len(image_data)
-    img = PILImage.open(BytesIO(image_data))
+    img = _normalize_image_for_processing(_open_image(image_data))
     normalized_extension = normalize_image_extension(file_extension)
     image_format = IMAGE_FORMAT_MAP.get(normalized_extension)
     if not image_format:
@@ -83,7 +122,7 @@ def compress_image(image_data, file_extension, quality=None):
 
 
 def create_thumbnail(image_data: bytes, size: int = 160, quality: int = 75) -> bytes:
-    image = PILImage.open(BytesIO(image_data))
+    image = _normalize_image_for_processing(_open_image(image_data))
     if image.mode not in ("RGB", "L"):
         image = image.convert("RGB")
 

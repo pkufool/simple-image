@@ -234,6 +234,162 @@ function toAbsoluteUrl(input) {
   }
 }
 
+function getFileExtension(name) {
+  const matched = String(name || "").toLowerCase().match(/\.([a-z0-9]+)$/);
+  return matched ? matched[1] : "";
+}
+
+function isHeicFile(file) {
+  const ext = getFileExtension(file?.name || "");
+  const type = String(file?.type || "").toLowerCase();
+  return ext === "heic" || ext === "heif" || type === "image/heic" || type === "image/heif";
+}
+
+function isJpegFile(file) {
+  const ext = getFileExtension(file?.name || "");
+  const type = String(file?.type || "").toLowerCase();
+  return ["jpg", "jpeg", "jpe", "jfif"].includes(ext) || type === "image/jpeg";
+}
+
+function toJpegFilename(name) {
+  const base = String(name || "image").replace(/\.[^/.]+$/, "");
+  return `${base}.jpg`;
+}
+
+function blobToFile(blob, fileName) {
+  return new File([blob], fileName, {
+    type: "image/jpeg",
+    lastModified: Date.now(),
+  });
+}
+
+function readFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function readExifOrientation(file) {
+  if (!isJpegFile(file)) {
+    return 1;
+  }
+  if (!window.ExifReader || typeof window.ExifReader.load !== "function") {
+    return 1;
+  }
+  try {
+    const buffer = await readFileAsArrayBuffer(file);
+    const tags = window.ExifReader.load(buffer);
+    const orientationTag = tags?.Orientation;
+    const rawValue = Array.isArray(orientationTag?.value) ? orientationTag.value[0] : orientationTag?.value;
+    const orientation = Number(rawValue);
+    return Number.isInteger(orientation) && orientation >= 1 && orientation <= 8 ? orientation : 1;
+  } catch (_error) {
+    return 1;
+  }
+}
+
+function loadImageFromBlob(blob) {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(blob);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Failed to decode image"));
+    };
+    image.src = objectUrl;
+  });
+}
+
+function canvasToJpegBlob(canvas, quality = 0.95) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error("Failed to encode JPEG"));
+          return;
+        }
+        resolve(blob);
+      },
+      "image/jpeg",
+      quality
+    );
+  });
+}
+
+function drawImageWithOrientation(ctx, image, orientation, width, height) {
+  switch (orientation) {
+    case 2:
+      ctx.transform(-1, 0, 0, 1, width, 0);
+      break;
+    case 3:
+      ctx.transform(-1, 0, 0, -1, width, height);
+      break;
+    case 4:
+      ctx.transform(1, 0, 0, -1, 0, height);
+      break;
+    case 5:
+      ctx.transform(0, 1, 1, 0, 0, 0);
+      break;
+    case 6:
+      ctx.transform(0, 1, -1, 0, height, 0);
+      break;
+    case 7:
+      ctx.transform(0, -1, -1, 0, height, width);
+      break;
+    case 8:
+      ctx.transform(0, -1, 1, 0, 0, width);
+      break;
+    default:
+      break;
+  }
+  ctx.drawImage(image, 0, 0, width, height);
+}
+
+async function normalizeImageToJpeg(file) {
+  const shouldNormalize = isHeicFile(file) || isJpegFile(file);
+  if (!shouldNormalize) {
+    return file;
+  }
+
+  let sourceBlob = file;
+  if (isHeicFile(file)) {
+    if (typeof window.heic2any !== "function") {
+      throw new Error("HEIC converter not available");
+    }
+    const converted = await window.heic2any({
+      blob: file,
+      toType: "image/jpeg",
+      quality: 0.95,
+    });
+    sourceBlob = Array.isArray(converted) ? converted[0] : converted;
+  }
+
+  const orientation = await readExifOrientation(file);
+  const image = await loadImageFromBlob(sourceBlob);
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  const swapSize = [5, 6, 7, 8].includes(orientation);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = swapSize ? sourceHeight : sourceWidth;
+  canvas.height = swapSize ? sourceWidth : sourceHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    throw new Error("Canvas 2D not available");
+  }
+  drawImageWithOrientation(ctx, image, orientation, sourceWidth, sourceHeight);
+
+  const jpegBlob = await canvasToJpegBlob(canvas, 0.95);
+  return blobToFile(jpegBlob, toJpegFilename(file.name));
+}
+
 const LazyThumb = {
   props: {
     src: {
@@ -381,6 +537,7 @@ const app = createApp({
       fileList: [],
       uploadItems: [],
       uploadResults: [],
+      uploadBuildToken: 0,
 
       maxUploadCount: MAX_UPLOAD_COUNT,
       maxFileSizeMB: MAX_FILE_SIZE_MB,
@@ -478,14 +635,14 @@ const app = createApp({
       return Math.max(0, Math.round((saved / img.original_size) * 100));
     },
 
-    onFileChange(_file, latestFileList) {
+    async onFileChange(_file, latestFileList) {
       this.fileList = this.validateFileList(latestFileList);
-      this.syncUploadItems();
+      await this.syncUploadItems();
     },
 
-    onFileRemove(_file, latestFileList) {
+    async onFileRemove(_file, latestFileList) {
       this.fileList = this.validateFileList(latestFileList, false);
-      this.syncUploadItems();
+      await this.syncUploadItems();
     },
 
     onUploadExceed() {
@@ -580,23 +737,41 @@ const app = createApp({
       }
     },
 
-    syncUploadItems() {
+    async syncUploadItems() {
+      const currentToken = ++this.uploadBuildToken;
       const existingTags = new Map(this.uploadItems.map((item) => [item.uid, item.tags]));
       this.cleanupObjectUrls();
 
-      this.uploadItems = this.fileList
-        .map((item) => {
-          if (!item.raw) {
-            return null;
+      const nextItems = [];
+      for (const item of this.fileList) {
+        if (!item?.raw) {
+          continue;
+        }
+        try {
+          const normalizedFile = await normalizeImageToJpeg(item.raw);
+          if (currentToken !== this.uploadBuildToken) {
+            return;
           }
-          return {
+          if (normalizedFile.size > MAX_FILE_SIZE_BYTES) {
+            const shown = normalizedFile.name || item.raw.name || "Unnamed file";
+            ElMessage.error(this.t("fileTooLargeRemoved", { files: shown, size: this.maxFileSizeMB }));
+            continue;
+          }
+
+          nextItems.push({
             uid: item.uid,
-            file: item.raw,
-            preview: URL.createObjectURL(item.raw),
+            file: normalizedFile,
+            preview: URL.createObjectURL(normalizedFile),
             tags: existingTags.get(item.uid) || [],
-          };
-        })
-        .filter(Boolean);
+          });
+        } catch (error) {
+          const fileName = item.raw.name || "Unnamed file";
+          const detail = error?.message || this.t("uploadFailed");
+          ElMessage.error(`${fileName}: ${detail}`);
+        }
+      }
+
+      this.uploadItems = nextItems;
     },
 
     cleanupObjectUrls() {
@@ -714,9 +889,9 @@ const app = createApp({
           .slice()
           .sort((a, b) => new Date(b.upload_time).getTime() - new Date(a.upload_time).getTime())
           .map((img) => ({
-          ...img,
-          _editTags: Array.isArray(img.tags) ? [...img.tags] : [],
-        }));
+            ...img,
+            _editTags: Array.isArray(img.tags) ? [...img.tags] : [],
+          }));
 
         if (!sortedImages.length && total > 0 && this.imagePage > 1) {
           this.imagePage -= 1;

@@ -1,12 +1,16 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Simple Image</title>
+  <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/exif-reader@2.0.3/index.min.js"></script>
   <link rel="stylesheet" href="static/vendor/element-plus.css" />
   <link rel="stylesheet" href="static/styles.css" />
 </head>
+
 <body>
   <div id="app-boot" aria-live="polite" aria-busy="true">
     <div class="boot-shell">
@@ -47,7 +51,8 @@
         </div>
         <div class="header-actions">
           <el-tag v-if="user" type="success">{{ user.username }}<span v-if="user.is_admin"> (admin)</span></el-tag>
-          <el-button v-if="user && user.is_admin" size="small" type="primary" plain @click="openAdminDialog">{{ t('adminAction') }}</el-button>
+          <el-button v-if="user && user.is_admin" size="small" type="primary" plain @click="openAdminDialog">{{
+            t('adminAction') }}</el-button>
           <el-button v-if="user" size="small" @click="logout">{{ t('logoutAction') }}</el-button>
         </div>
       </el-header>
@@ -58,28 +63,21 @@
             <el-card class="panel" shadow="hover">
               <el-tabs v-model="activeTab" type="border-card" @tab-click="onTabClick">
                 <el-tab-pane :label="t('tabUpload')" name="upload">
-                  <el-alert v-if="!user" :title="t('loginRequiredUploadTitle')" type="info" :closable="false" style="margin-bottom:12px">
+                  <el-alert v-if="!user" :title="t('loginRequiredUploadTitle')" type="info" :closable="false"
+                    style="margin-bottom:12px">
                     <template #default>
                       <el-button text type="primary" @click="requestUploadLogin">{{ t('goLogin') }}</el-button>
                     </template>
                   </el-alert>
 
-                  <el-upload
-                    ref="uploadRef"
-                    action=""
-                    drag
-                    multiple
-                    :auto-upload="false"
-                    :on-change="onFileChange"
-                    :on-remove="onFileRemove"
-                    :on-exceed="onUploadExceed"
-                    :file-list="fileList"
-                    :limit="maxUploadCount"
-                    accept="image/*"
-                  >
-                    <div class="el-upload__text">{{ t('uploadDropTextPrefix') }}<em>{{ t('uploadDropTextAction') }}</em></div>
+                  <el-upload ref="uploadRef" action="" drag multiple :auto-upload="false" :on-change="onFileChange"
+                    :on-remove="onFileRemove" :on-exceed="onUploadExceed" :file-list="fileList" :limit="maxUploadCount"
+                    accept="image/*">
+                    <div class="el-upload__text">{{ t('uploadDropTextPrefix') }}<em>{{ t('uploadDropTextAction') }}</em>
+                    </div>
                     <template #tip>
-                      <div class="el-upload__tip">{{ t('uploadTip', { count: maxUploadCount, size: maxFileSizeMB }) }}</div>
+                      <div class="el-upload__tip">{{ t('uploadTip', { count: maxUploadCount, size: maxFileSizeMB }) }}
+                      </div>
                     </template>
                   </el-upload>
 
@@ -88,15 +86,8 @@
                       <img :src="item.preview" alt="preview" />
                       <div class="preview-meta">
                         <div class="name">{{ item.file.name }}</div>
-                        <el-select
-                          v-model="item.tags"
-                          multiple
-                          filterable
-                          allow-create
-                          default-first-option
-                          :placeholder="t('tagsCreatablePlaceholder')"
-                          style="width:100%"
-                        >
+                        <el-select v-model="item.tags" multiple filterable allow-create default-first-option
+                          :placeholder="t('tagsCreatablePlaceholder')" style="width:100%">
                           <el-option v-for="tag in tags" :key="tag" :label="tag" :value="tag"></el-option>
                         </el-select>
                       </div>
@@ -111,18 +102,18 @@
                     <el-card v-for="res in uploadResults" :key="res.id" class="upload-result-card" shadow="never">
                       <div class="upload-result-row">
                         <a :href="imageUrl(res.id)" target="_blank" rel="noopener">
-                          <lazy-thumb
-                            wrapper-class="upload-result-thumb"
-                            :src="thumbnailUrl(res.id, 144)"
-                            :alt="res.filename"
-                          ></lazy-thumb>
+                          <lazy-thumb wrapper-class="upload-result-thumb" :src="thumbnailUrl(res.id, 144)"
+                            :alt="res.filename"></lazy-thumb>
                         </a>
                         <div class="upload-result-main">
                           <div class="upload-result-title">{{ res.filename }} {{ t('uploadSuccessSuffix') }}</div>
-                          <div class="upload-result-filename">{{ t('originalFilenameLabel', { name: res.filename }) }}</div>
+                          <div class="upload-result-filename">{{ t('originalFilenameLabel', { name: res.filename }) }}
+                          </div>
                           <div class="upload-result-link-row">
-                            <a class="upload-result-link" :href="imageUrl(res.id)" target="_blank" rel="noopener">{{ imageUrl(res.id) }}</a>
-                            <el-button size="small" @click="copyText(imageUrl(res.id))">{{ t('copyLinkAction') }}</el-button>
+                            <a class="upload-result-link" :href="imageUrl(res.id)" target="_blank" rel="noopener">{{
+                              imageUrl(res.id) }}</a>
+                            <el-button size="small" @click="copyText(imageUrl(res.id))">{{ t('copyLinkAction')
+                              }}</el-button>
                           </div>
                           <div class="upload-result-tags" v-if="res.tags && res.tags.length">
                             <el-tag v-for="tag in res.tags" :key="tag" size="small" effect="plain">{{ tag }}</el-tag>
@@ -134,7 +125,8 @@
                 </el-tab-pane>
 
                 <el-tab-pane :label="t('tabImages')" name="images">
-                  <el-alert v-if="!user" :title="t('loginRequiredImagesTitle')" type="info" :closable="false" style="margin-bottom:12px">
+                  <el-alert v-if="!user" :title="t('loginRequiredImagesTitle')" type="info" :closable="false"
+                    style="margin-bottom:12px">
                     <template #default>
                       {{ t('loginRequiredImagesText') }}
                       <el-button text type="primary" @click="requestImagesLogin">{{ t('goLogin') }}</el-button>
@@ -143,35 +135,31 @@
 
                   <el-row :gutter="8" style="margin-bottom: 12px;">
                     <el-col :span="18">
-                      <el-select v-model="imageFilterTag" clearable filterable :placeholder="t('filterByTag')" style="width: 100%" @change="onImageFilterChange" :disabled="!user">
+                      <el-select v-model="imageFilterTag" clearable filterable :placeholder="t('filterByTag')"
+                        style="width: 100%" @change="onImageFilterChange" :disabled="!user">
                         <el-option v-for="tag in tags" :key="tag" :label="tag" :value="tag"></el-option>
                       </el-select>
                     </el-col>
                     <el-col :span="6">
-                      <el-button style="width:100%" :loading="imagesLoading" @click="fetchMyImages">{{ t('refreshAction') }}</el-button>
+                      <el-button style="width:100%" :loading="imagesLoading" @click="fetchMyImages">{{
+                        t('refreshAction') }}</el-button>
                     </el-col>
                   </el-row>
 
                   <el-empty v-if="!imagesLoading && !images.length" :description="t('emptyImages')"></el-empty>
                   <el-collapse v-if="monthGroups.length" v-model="activeMonthGroups" class="month-collapse">
-                    <el-collapse-item
-                      v-for="group in monthGroups"
-                      :key="group.key"
-                      :name="group.key"
-                    >
+                    <el-collapse-item v-for="group in monthGroups" :key="group.key" :name="group.key">
                       <template #title>
-                        <span class="month-group-title">{{ t('monthTitle', { label: group.label, count: group.items.length }) }}</span>
+                        <span class="month-group-title">{{ t('monthTitle', { label: group.label, count:
+                          group.items.length }) }}</span>
                       </template>
 
                       <div class="image-row-list">
                         <el-card v-for="img in group.items" :key="img.id" class="image-row-card" shadow="never">
                           <div class="image-row">
                             <a :href="imageUrl(img.id)" target="_blank" rel="noopener">
-                              <lazy-thumb
-                                wrapper-class="image-row-thumb"
-                                :src="thumbnailUrl(img.id, 160)"
-                                :alt="img.filename"
-                              ></lazy-thumb>
+                              <lazy-thumb wrapper-class="image-row-thumb" :src="thumbnailUrl(img.id, 160)"
+                                :alt="img.filename"></lazy-thumb>
                             </a>
                             <div class="image-row-content">
                               <h4>{{ img.filename }}</h4>
@@ -179,8 +167,10 @@
                               <div class="image-link-row">
                                 <span class="image-link-label">{{ t('linkLabel') }}</span>
                                 <a :href="imageUrl(img.id)" target="_blank" rel="noopener">{{ imageUrl(img.id) }}</a>
-                                <el-button size="small" @click="copyText(imageUrl(img.id))">{{ t('copyLinkAction') }}</el-button>
-                                <el-button size="small" type="primary" plain @click="downloadImage(img)">{{ t('downloadAction') }}</el-button>
+                                <el-button size="small" @click="copyText(imageUrl(img.id))">{{ t('copyLinkAction')
+                                  }}</el-button>
+                                <el-button size="small" type="primary" plain @click="downloadImage(img)">{{
+                                  t('downloadAction') }}</el-button>
                                 <el-popconfirm :title="t('confirmDeleteTitle')" @confirm="deleteImage(img)">
                                   <template #reference>
                                     <el-button size="small" type="danger" plain>{{ t('deleteAction') }}</el-button>
@@ -188,18 +178,12 @@
                                 </el-popconfirm>
                               </div>
                               <p>
-                                {{ t('compressInfo', { original: formatSize(img.original_size), compressed: formatSize(img.compressed_size), percent: savePercent(img) }) }}
+                                {{ t('compressInfo', { original: formatSize(img.original_size), compressed:
+                                formatSize(img.compressed_size), percent: savePercent(img) }) }}
                               </p>
                               <div class="tag-edit-row">
-                                <el-select
-                                  v-model="img._editTags"
-                                  multiple
-                                  filterable
-                                  allow-create
-                                  default-first-option
-                                  :placeholder="t('editTagsPlaceholder')"
-                                  class="tag-select"
-                                >
+                                <el-select v-model="img._editTags" multiple filterable allow-create default-first-option
+                                  :placeholder="t('editTagsPlaceholder')" class="tag-select">
                                   <el-option v-for="tag in tags" :key="tag" :label="tag" :value="tag"></el-option>
                                 </el-select>
                                 <el-button size="small" @click="updateTags(img)">{{ t('updateTagsAction') }}</el-button>
@@ -211,16 +195,9 @@
                     </el-collapse-item>
                   </el-collapse>
                   <div v-if="imageTotal > imagePageSize" class="image-pagination-wrap">
-                    <el-pagination
-                      background
-                      layout="total, prev, pager, next"
-                      :total="imageTotal"
-                      :current-page="imagePage"
-                      :page-size="imagePageSize"
-                      :pager-count="7"
-                      :disabled="imagesLoading"
-                      @current-change="onImagePageChange"
-                    ></el-pagination>
+                    <el-pagination background layout="total, prev, pager, next" :total="imageTotal"
+                      :current-page="imagePage" :page-size="imagePageSize" :pager-count="7" :disabled="imagesLoading"
+                      @current-change="onImagePageChange"></el-pagination>
                   </div>
                 </el-tab-pane>
               </el-tabs>
@@ -234,10 +211,12 @@
       <p class="hint" style="margin-top: 0; margin-bottom: 12px;">{{ loginReason || t('loginHintDefault') }}</p>
       <el-form :model="loginForm" @submit.prevent="login" label-position="top">
         <el-form-item :label="t('usernameLabel')">
-          <el-input v-model="loginForm.username" autocomplete="username" :placeholder="t('usernamePlaceholder')"></el-input>
+          <el-input v-model="loginForm.username" autocomplete="username"
+            :placeholder="t('usernamePlaceholder')"></el-input>
         </el-form-item>
         <el-form-item :label="t('passwordLabel')">
-          <el-input v-model="loginForm.password" type="password" show-password autocomplete="current-password" :placeholder="t('passwordPlaceholder')"></el-input>
+          <el-input v-model="loginForm.password" type="password" show-password autocomplete="current-password"
+            :placeholder="t('passwordPlaceholder')"></el-input>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -275,13 +254,15 @@
         <el-table-column prop="username" :label="t('columnUsername')" min-width="120"></el-table-column>
         <el-table-column :label="t('columnRole')" min-width="90">
           <template #default="scope">
-            <el-tag :type="scope.row.is_admin ? 'danger' : 'info'" size="small">{{ roleLabel(scope.row.is_admin) }}</el-tag>
+            <el-tag :type="scope.row.is_admin ? 'danger' : 'info'" size="small">{{ roleLabel(scope.row.is_admin)
+              }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column :label="t('columnCompressPolicy')" min-width="160">
           <template #default="scope">
             <el-tag :type="scope.row.compress_enabled ? 'success' : 'warning'" size="small">
-              {{ scope.row.compress_enabled ? t('compressOnWithQuality', { quality: scope.row.compress_quality }) : t('compressOff') }}
+              {{ scope.row.compress_enabled ? t('compressOnWithQuality', { quality: scope.row.compress_quality }) :
+              t('compressOff') }}
             </el-tag>
           </template>
         </el-table-column>
@@ -292,7 +273,8 @@
         </el-table-column>
         <el-table-column :label="t('columnUploadSettings')" min-width="120">
           <template #default="scope">
-            <el-button size="small" type="primary" plain @click="openUploadSettingsDialog(scope.row)">{{ t('settingsAction') }}</el-button>
+            <el-button size="small" type="primary" plain @click="openUploadSettingsDialog(scope.row)">{{
+              t('settingsAction') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -324,19 +306,15 @@
           <el-switch v-model="uploadSettingsForm.compress_enabled"></el-switch>
         </el-form-item>
         <el-form-item :label="t('compressQualityLabel')">
-          <el-input-number
-            v-model="uploadSettingsForm.compress_quality"
-            :min="1"
-            :max="95"
-            :disabled="!uploadSettingsForm.compress_enabled"
-            style="width: 100%"
-          ></el-input-number>
+          <el-input-number v-model="uploadSettingsForm.compress_quality" :min="1" :max="95"
+            :disabled="!uploadSettingsForm.compress_enabled" style="width: 100%"></el-input-number>
         </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="uploadSettingsDialogVisible = false">{{ t('cancelAction') }}</el-button>
-          <el-button type="primary" :loading="adminLoading" @click="updateUploadSettings">{{ t('saveAction') }}</el-button>
+          <el-button type="primary" :loading="adminLoading" @click="updateUploadSettings">{{ t('saveAction')
+            }}</el-button>
         </span>
       </template>
     </el-dialog>
@@ -347,4 +325,5 @@
   <script src="static/vendor/axios.min.js"></script>
   <script src="static/app.js"></script>
 </body>
+
 </html>

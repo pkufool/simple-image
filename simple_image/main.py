@@ -27,6 +27,7 @@ IMAGE_MEDIA_TYPES = {
     "gif": "image/gif",
     "webp": "image/webp",
 }
+TRANSCODE_ONLY_EXTENSIONS = {"heic", "heif", "jpeg"}
 DEFAULT_COMPRESS_QUALITY = 25
 SESSION_COOKIE_NAME = "simple_image_session"
 
@@ -427,14 +428,19 @@ def _register_routes(app: FastAPI) -> None:
 
         try:
             original_size = len(image_data)
-            if current_user.compress_enabled:
+            needs_transcode = detected_extension in TRANSCODE_ONLY_EXTENSIONS
+            if current_user.compress_enabled or needs_transcode:
+                output_quality = current_user.compress_quality if current_user.compress_enabled else 95
                 compressed_data, _, compressed_size = compress_image(
                     image_data,
                     extension,
-                    quality=current_user.compress_quality,
+                    quality=output_quality,
                 )
                 stored_data = compressed_data
-                upload_message = "Image uploaded and compressed successfully"
+                if current_user.compress_enabled:
+                    upload_message = "Image uploaded and compressed successfully"
+                else:
+                    upload_message = "Image uploaded successfully (converted from HEIC/HEIF for compatibility)"
             else:
                 stored_data = image_data
                 compressed_size = original_size

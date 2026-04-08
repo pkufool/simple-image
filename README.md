@@ -9,6 +9,7 @@
 - 登录会话：HttpOnly Cookie 承载（不再使用 localStorage token）
 - 用户管理：仅 admin 可新增用户、修改用户密码
 - 上传压缩策略：admin 可针对每个用户设置“是否压缩”与“压缩率”
+- iPhone 图片兼容：支持 HEIC/HEIF 上传（服务端自动转 JPEG 存储），并自动处理 EXIF 方向
 
 ## 安装
 
