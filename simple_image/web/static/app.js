@@ -14,6 +14,13 @@ function resolveApiBasePath() {
 const MAX_UPLOAD_COUNT = 5;
 const MAX_FILE_SIZE_MB = 10;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+const DEFAULT_CLIENT_COMPRESS_ENABLED = true;
+const DEFAULT_CLIENT_COMPRESS_QUALITY = 82;
+const DEFAULT_CLIENT_MAX_EDGE = 2560;
+const MIN_CLIENT_COMPRESS_QUALITY = 40;
+const MAX_CLIENT_COMPRESS_QUALITY = 95;
+const MIN_CLIENT_MAX_EDGE = 720;
+const MAX_CLIENT_MAX_EDGE = 4096;
 
 const I18N_MESSAGES = {
   zh: {
@@ -22,6 +29,7 @@ const I18N_MESSAGES = {
     adminAction: "管理",
     logoutAction: "退出登录",
     tabUpload: "上传图片",
+    tabCompress: "压缩图片",
     tabImages: "我的图片",
     loginRequiredUploadTitle: "上传图片需要登录",
     loginRequiredImagesTitle: "查看图片需要登录",
@@ -29,10 +37,21 @@ const I18N_MESSAGES = {
     uploadDropTextPrefix: "拖拽图片到此处，或",
     uploadDropTextAction: "点击选择",
     uploadTip: "最多 {count} 张（超出仅保留前 {count} 张），每张不超过 {size}MB",
+    uploadRawHint: "上传 tab 会始终上传原始文件；HEIC/EXIF 转换统一交给后端处理。",
+    clientCompressPanelTitle: "前端压缩",
+    clientCompressQualityLabel: "画质",
+    clientCompressMaxEdgeLabel: "最长边",
+    clientCompressHint: "上传前会在浏览器中修正方向、缩放并压缩图片，能明显降低上传带宽；HEIC 仍需要本地解码，减小最长边通常会更快。",
+    localCompressHint: "此 tab 只在浏览器本地处理图片，不会上传到服务器。支持 HEIC 和 EXIF 方向修正。",
+    localDownloadAction: "下载压缩结果",
+    localClearAction: "清空",
+    localCompressFailed: "本地压缩失败：{name}",
+    previewUnavailable: "无法预览",
     tagsCreatablePlaceholder: "标签（可创建）",
     uploadSelectedAction: "上传已选图片",
     uploadSuccessSuffix: "上传成功",
     originalFilenameLabel: "原文件名：{name}",
+    previewSizeInfo: "本地处理：{original} -> {compressed}",
     copyLinkAction: "复制链接",
     loginRequiredImagesText: "查看和管理我的图片需要登录。",
     filterByTag: "按标签筛选",
@@ -122,6 +141,7 @@ const I18N_MESSAGES = {
     adminAction: "Admin",
     logoutAction: "Log out",
     tabUpload: "Upload",
+    tabCompress: "Compress",
     tabImages: "My Images",
     loginRequiredUploadTitle: "Login required to upload images",
     loginRequiredImagesTitle: "Login required to view images",
@@ -129,10 +149,21 @@ const I18N_MESSAGES = {
     uploadDropTextPrefix: "Drag images here, or",
     uploadDropTextAction: "click to select",
     uploadTip: "Up to {count} images (keeping first {count}); each no larger than {size}MB",
+    uploadRawHint: "Upload tab always sends original files. HEIC/EXIF conversion is handled by the server.",
+    clientCompressPanelTitle: "Client-side compression",
+    clientCompressQualityLabel: "Quality",
+    clientCompressMaxEdgeLabel: "Max edge",
+    clientCompressHint: "Images are oriented, resized, and compressed in the browser before upload to reduce bandwidth. HEIC still needs local decoding, and a smaller max edge is usually faster.",
+    localCompressHint: "This tab only processes images in the browser and never uploads them. Supports HEIC and EXIF orientation fixes.",
+    localDownloadAction: "Download result",
+    localClearAction: "Clear",
+    localCompressFailed: "Local compression failed: {name}",
+    previewUnavailable: "Preview unavailable",
     tagsCreatablePlaceholder: "Tags (creatable)",
     uploadSelectedAction: "Upload selected images",
     uploadSuccessSuffix: "uploaded successfully",
     originalFilenameLabel: "Original filename: {name}",
+    previewSizeInfo: "Local processing: {original} -> {compressed}",
     copyLinkAction: "Copy link",
     loginRequiredImagesText: "Login is required to view and manage your images.",
     filterByTag: "Filter by tag",
@@ -251,44 +282,66 @@ function isJpegFile(file) {
   return ["jpg", "jpeg", "jpe", "jfif"].includes(ext) || type === "image/jpeg";
 }
 
+function isPngFile(file) {
+  const ext = getFileExtension(file?.name || "");
+  const type = String(file?.type || "").toLowerCase();
+  return ext === "png" || type === "image/png";
+}
+
+function isWebpFile(file) {
+  const ext = getFileExtension(file?.name || "");
+  const type = String(file?.type || "").toLowerCase();
+  return ext === "webp" || type === "image/webp";
+}
+
+function isGifFile(file) {
+  const ext = getFileExtension(file?.name || "");
+  const type = String(file?.type || "").toLowerCase();
+  return ext === "gif" || type === "image/gif";
+}
+
+function isSvgFile(file) {
+  const ext = getFileExtension(file?.name || "");
+  const type = String(file?.type || "").toLowerCase();
+  return ext === "svg" || type === "image/svg+xml";
+}
+
+function isCanvasProcessableImage(file) {
+  const type = String(file?.type || "").toLowerCase();
+  if (isHeicFile(file) || isSvgFile(file) || isGifFile(file)) {
+    return !isSvgFile(file) && !isGifFile(file);
+  }
+  return type.startsWith("image/") || isJpegFile(file) || isPngFile(file) || isWebpFile(file);
+}
+
 function toJpegFilename(name) {
   const base = String(name || "image").replace(/\.[^/.]+$/, "");
   return `${base}.jpg`;
 }
 
-function blobToFile(blob, fileName) {
+function blobToFile(blob, fileName, type = blob?.type || "application/octet-stream") {
   return new File([blob], fileName, {
-    type: "image/jpeg",
+    type,
     lastModified: Date.now(),
   });
 }
 
-function readFileAsArrayBuffer(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error("Failed to read file"));
-    reader.readAsArrayBuffer(file);
-  });
+function replaceFileExtension(name, extension) {
+  const base = String(name || "image").replace(/\.[^/.]+$/, "");
+  return `${base}.${extension}`;
 }
 
-async function readExifOrientation(file) {
-  if (!isJpegFile(file)) {
-    return 1;
+function toOutputFilename(name, outputType) {
+  if (outputType === "image/jpeg") {
+    return toJpegFilename(name);
   }
-  if (!window.ExifReader || typeof window.ExifReader.load !== "function") {
-    return 1;
+  if (outputType === "image/png") {
+    return replaceFileExtension(name, "png");
   }
-  try {
-    const buffer = await readFileAsArrayBuffer(file);
-    const tags = window.ExifReader.load(buffer);
-    const orientationTag = tags?.Orientation;
-    const rawValue = Array.isArray(orientationTag?.value) ? orientationTag.value[0] : orientationTag?.value;
-    const orientation = Number(rawValue);
-    return Number.isInteger(orientation) && orientation >= 1 && orientation <= 8 ? orientation : 1;
-  } catch (_error) {
-    return 1;
+  if (outputType === "image/webp") {
+    return replaceFileExtension(name, "webp");
   }
+  return name || "image";
 }
 
 function loadImageFromBlob(blob) {
@@ -307,87 +360,202 @@ function loadImageFromBlob(blob) {
   });
 }
 
-function canvasToJpegBlob(canvas, quality = 0.95) {
+async function decodeImageSource(blob) {
+  if (typeof window.createImageBitmap === "function") {
+    try {
+      return await window.createImageBitmap(blob, {
+        imageOrientation: "from-image",
+        premultiplyAlpha: "none",
+        colorSpaceConversion: "default",
+      });
+    } catch (_error) {
+      try {
+        return await window.createImageBitmap(blob);
+      } catch (_error2) {
+        // Fallback below.
+      }
+    }
+  }
+  return loadImageFromBlob(blob);
+}
+
+function closeImageSource(imageSource) {
+  if (imageSource && typeof imageSource.close === "function") {
+    imageSource.close();
+  }
+}
+
+function createRenderCanvas(width, height) {
+  if (typeof window.OffscreenCanvas === "function") {
+    return new window.OffscreenCanvas(width, height);
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
+async function canvasToBlob(canvas, type, quality) {
+  if (typeof canvas.convertToBlob === "function") {
+    return canvas.convertToBlob({ type, quality });
+  }
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
         if (!blob) {
-          reject(new Error("Failed to encode JPEG"));
+          reject(new Error("Failed to encode image"));
           return;
         }
         resolve(blob);
       },
-      "image/jpeg",
+      type,
       quality
     );
   });
 }
 
-function drawImageWithOrientation(ctx, image, orientation, width, height) {
-  switch (orientation) {
-    case 2:
-      ctx.transform(-1, 0, 0, 1, width, 0);
-      break;
-    case 3:
-      ctx.transform(-1, 0, 0, -1, width, height);
-      break;
-    case 4:
-      ctx.transform(1, 0, 0, -1, 0, height);
-      break;
-    case 5:
-      ctx.transform(0, 1, 1, 0, 0, 0);
-      break;
-    case 6:
-      ctx.transform(0, 1, -1, 0, height, 0);
-      break;
-    case 7:
-      ctx.transform(0, -1, -1, 0, height, width);
-      break;
-    case 8:
-      ctx.transform(0, -1, 1, 0, 0, width);
-      break;
-    default:
-      break;
+function calculateTargetDimensions(width, height, maxEdge) {
+  const safeWidth = Math.max(1, Math.round(width || 1));
+  const safeHeight = Math.max(1, Math.round(height || 1));
+  const safeMaxEdge = Math.max(1, Math.round(maxEdge || 1));
+  const longest = Math.max(safeWidth, safeHeight);
+  if (longest <= safeMaxEdge) {
+    return {
+      width: safeWidth,
+      height: safeHeight,
+      resized: false,
+    };
   }
-  ctx.drawImage(image, 0, 0, width, height);
+
+  const ratio = safeMaxEdge / longest;
+  return {
+    width: Math.max(1, Math.round(safeWidth * ratio)),
+    height: Math.max(1, Math.round(safeHeight * ratio)),
+    resized: true,
+  };
 }
 
-async function normalizeImageToJpeg(file) {
+function supportsEncoderQuality(type) {
+  return type === "image/jpeg" || type === "image/webp";
+}
+
+function toCanvasQuality(quality) {
+  const safeQuality = Number(quality);
+  const normalized = Number.isFinite(safeQuality) ? safeQuality : DEFAULT_CLIENT_COMPRESS_QUALITY;
+  const clamped = Math.min(MAX_CLIENT_COMPRESS_QUALITY, Math.max(MIN_CLIENT_COMPRESS_QUALITY, normalized));
+  return clamped / 100;
+}
+
+function clampMaxEdge(maxEdge) {
+  const value = Number(maxEdge);
+  if (!Number.isFinite(value)) {
+    return DEFAULT_CLIENT_MAX_EDGE;
+  }
+  return Math.min(MAX_CLIENT_MAX_EDGE, Math.max(MIN_CLIENT_MAX_EDGE, Math.round(value)));
+}
+
+function getPreferredOutputType(file) {
+  if (isHeicFile(file) || isJpegFile(file)) {
+    return "image/jpeg";
+  }
+  if (isWebpFile(file)) {
+    return "image/webp";
+  }
+  if (isPngFile(file)) {
+    return "image/png";
+  }
+  return String(file?.type || "image/jpeg").toLowerCase() || "image/jpeg";
+}
+
+async function prepareImageForUpload(file, options = {}) {
+  const compressionEnabled = !!options.enabled;
+  const canProcess = isCanvasProcessableImage(file);
   const shouldNormalize = isHeicFile(file) || isJpegFile(file);
-  if (!shouldNormalize) {
-    return file;
+  const shouldCompress = compressionEnabled && canProcess;
+
+  if (!shouldNormalize && !shouldCompress) {
+    return {
+      file,
+      changed: false,
+      originalSize: file.size,
+      processedSize: file.size,
+    };
   }
 
   let sourceBlob = file;
+  let outputType = getPreferredOutputType(file);
+  let outputName = toOutputFilename(file.name, outputType);
+
   if (isHeicFile(file)) {
     if (typeof window.heic2any !== "function") {
       throw new Error("HEIC converter not available");
     }
     const converted = await window.heic2any({
       blob: file,
-      toType: "image/jpeg",
-      quality: 0.95,
+      toType: shouldCompress ? "image/png" : "image/jpeg",
+      quality: toCanvasQuality(options.quality),
     });
     sourceBlob = Array.isArray(converted) ? converted[0] : converted;
+    outputType = "image/jpeg";
+    outputName = toJpegFilename(file.name);
+
+    if (!shouldCompress) {
+      const convertedFile = blobToFile(sourceBlob, outputName, outputType);
+      return {
+        file: convertedFile,
+        changed: true,
+        originalSize: file.size,
+        processedSize: convertedFile.size,
+      };
+    }
   }
 
-  const orientation = await readExifOrientation(file);
-  const image = await loadImageFromBlob(sourceBlob);
-  const sourceWidth = image.naturalWidth || image.width;
-  const sourceHeight = image.naturalHeight || image.height;
-  const swapSize = [5, 6, 7, 8].includes(orientation);
+  let imageSource = null;
+  try {
+    imageSource = await decodeImageSource(sourceBlob);
+    const sourceWidth = imageSource.naturalWidth || imageSource.displayWidth || imageSource.width;
+    const sourceHeight = imageSource.naturalHeight || imageSource.displayHeight || imageSource.height;
+    const targetSize = shouldCompress
+      ? calculateTargetDimensions(sourceWidth, sourceHeight, clampMaxEdge(options.maxEdge))
+      : { width: sourceWidth, height: sourceHeight, resized: false };
 
-  const canvas = document.createElement("canvas");
-  canvas.width = swapSize ? sourceHeight : sourceWidth;
-  canvas.height = swapSize ? sourceWidth : sourceHeight;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    throw new Error("Canvas 2D not available");
+    const needsCanvasRender = shouldNormalize || targetSize.resized || (shouldCompress && supportsEncoderQuality(outputType));
+    if (!needsCanvasRender) {
+      return {
+        file,
+        changed: false,
+        originalSize: file.size,
+        processedSize: file.size,
+      };
+    }
+
+    const canvas = createRenderCanvas(targetSize.width, targetSize.height);
+    const ctx = canvas.getContext("2d", { alpha: outputType !== "image/jpeg" }) || canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("Canvas 2D not available");
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    if (outputType === "image/jpeg") {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, targetSize.width, targetSize.height);
+    }
+    ctx.drawImage(imageSource, 0, 0, targetSize.width, targetSize.height);
+
+    const quality = supportsEncoderQuality(outputType)
+      ? (shouldCompress ? toCanvasQuality(options.quality) : 0.92)
+      : undefined;
+    const outputBlob = await canvasToBlob(canvas, outputType, quality);
+    const outputFile = blobToFile(outputBlob, outputName, outputType);
+    return {
+      file: outputFile,
+      changed: outputFile.size !== file.size || outputFile.name !== file.name,
+      originalSize: file.size,
+      processedSize: outputFile.size,
+    };
+  } finally {
+    closeImageSource(imageSource);
   }
-  drawImageWithOrientation(ctx, image, orientation, sourceWidth, sourceHeight);
-
-  const jpegBlob = await canvasToJpegBlob(canvas, 0.95);
-  return blobToFile(jpegBlob, toJpegFilename(file.name));
 }
 
 const LazyThumb = {
@@ -537,7 +705,11 @@ const app = createApp({
       fileList: [],
       uploadItems: [],
       uploadResults: [],
-      uploadBuildToken: 0,
+      compressFileList: [],
+      compressItems: [],
+      compressBuildToken: 0,
+      clientCompressQuality: DEFAULT_CLIENT_COMPRESS_QUALITY,
+      clientCompressMaxEdge: DEFAULT_CLIENT_MAX_EDGE,
 
       maxUploadCount: MAX_UPLOAD_COUNT,
       maxFileSizeMB: MAX_FILE_SIZE_MB,
@@ -637,21 +809,49 @@ const app = createApp({
 
     async onFileChange(_file, latestFileList) {
       this.fileList = this.validateFileList(latestFileList);
-      await this.syncUploadItems();
+      this.syncUploadItems();
     },
 
     async onFileRemove(_file, latestFileList) {
       this.fileList = this.validateFileList(latestFileList, false);
-      await this.syncUploadItems();
+      this.syncUploadItems();
     },
 
     onUploadExceed() {
       ElMessage.error(this.t("maxSelectCount", { count: this.maxUploadCount }));
     },
 
+    async onCompressFileChange(_file, latestFileList) {
+      this.compressFileList = this.validateFileList(latestFileList);
+      await this.syncCompressItems();
+    },
+
+    async onCompressFileRemove(_file, latestFileList) {
+      this.compressFileList = this.validateFileList(latestFileList, false);
+      await this.syncCompressItems();
+    },
+
+    onCompressExceed() {
+      ElMessage.error(this.t("maxSelectCount", { count: this.maxUploadCount }));
+    },
+
+    async refreshCompressItemsAfterOptionsChange() {
+      if (!this.compressFileList.length) {
+        return;
+      }
+      await this.syncCompressItems();
+    },
+
+    buildClientCompressionOptions() {
+      return {
+        enabled: true,
+        quality: this.clientCompressQuality,
+        maxEdge: this.clientCompressMaxEdge,
+      };
+    },
+
     validateFileList(fileList, showMessage = true) {
       const valid = [];
-      const oversizedNames = [];
 
       for (const item of fileList || []) {
         if (valid.length >= this.maxUploadCount) {
@@ -661,21 +861,12 @@ const app = createApp({
         if (!raw) {
           continue;
         }
-        if (raw.size > MAX_FILE_SIZE_BYTES) {
-          oversizedNames.push(raw.name || "Unnamed file");
-          continue;
-        }
         valid.push(item);
       }
 
       if (showMessage) {
         if ((fileList || []).length > this.maxUploadCount) {
           ElMessage.error(this.t("maxSelectKeep", { count: this.maxUploadCount }));
-        }
-        if (oversizedNames.length) {
-          const shown = oversizedNames.slice(0, 2).join(", ");
-          const suffix = oversizedNames.length > 2 ? " ..." : "";
-          ElMessage.error(this.t("fileTooLargeRemoved", { files: `${shown}${suffix}`, size: this.maxFileSizeMB }));
         }
       }
 
@@ -737,49 +928,114 @@ const app = createApp({
       }
     },
 
-    async syncUploadItems() {
-      const currentToken = ++this.uploadBuildToken;
+    syncUploadItems() {
       const existingTags = new Map(this.uploadItems.map((item) => [item.uid, item.tags]));
-      this.cleanupObjectUrls();
+      this.cleanupUploadObjectUrls();
 
       const nextItems = [];
       for (const item of this.fileList) {
-        if (!item?.raw) {
+        const raw = item?.raw;
+        if (!raw) {
           continue;
         }
-        try {
-          const normalizedFile = await normalizeImageToJpeg(item.raw);
-          if (currentToken !== this.uploadBuildToken) {
-            return;
-          }
-          if (normalizedFile.size > MAX_FILE_SIZE_BYTES) {
-            const shown = normalizedFile.name || item.raw.name || "Unnamed file";
-            ElMessage.error(this.t("fileTooLargeRemoved", { files: shown, size: this.maxFileSizeMB }));
-            continue;
-          }
-
-          nextItems.push({
-            uid: item.uid,
-            file: normalizedFile,
-            preview: URL.createObjectURL(normalizedFile),
-            tags: existingTags.get(item.uid) || [],
-          });
-        } catch (error) {
-          const fileName = item.raw.name || "Unnamed file";
-          const detail = error?.message || this.t("uploadFailed");
-          ElMessage.error(`${fileName}: ${detail}`);
-        }
+        nextItems.push({
+          uid: item.uid,
+          file: raw,
+          preview: URL.createObjectURL(raw),
+          tags: existingTags.get(item.uid) || [],
+          previewFailed: false,
+        });
       }
 
       this.uploadItems = nextItems;
     },
 
-    cleanupObjectUrls() {
+    async syncCompressItems() {
+      const currentToken = ++this.compressBuildToken;
+      this.cleanupCompressObjectUrls();
+
+      const nextItems = [];
+      for (const item of this.compressFileList) {
+        if (!item?.raw) {
+          continue;
+        }
+        try {
+          const prepared = await prepareImageForUpload(item.raw, this.buildClientCompressionOptions());
+          if (currentToken !== this.compressBuildToken) {
+            return;
+          }
+          nextItems.push({
+            uid: item.uid,
+            file: prepared.file,
+            preview: URL.createObjectURL(prepared.file),
+            originalSize: prepared.originalSize,
+            processedSize: prepared.processedSize,
+            changed: prepared.changed,
+            error: "",
+          });
+        } catch (error) {
+          if (currentToken !== this.compressBuildToken) {
+            return;
+          }
+          const name = item.raw.name || "Unnamed file";
+          nextItems.push({
+            uid: item.uid,
+            file: null,
+            preview: "",
+            originalSize: item.raw.size,
+            processedSize: item.raw.size,
+            changed: false,
+            error: error?.message || this.t("localCompressFailed", { name }),
+            failedName: name,
+          });
+        }
+      }
+
+      this.compressItems = nextItems;
+    },
+
+    cleanupUploadObjectUrls() {
       this.uploadItems.forEach((item) => {
         if (item.preview) {
           URL.revokeObjectURL(item.preview);
         }
       });
+    },
+
+    cleanupCompressObjectUrls() {
+      this.compressItems.forEach((item) => {
+        if (item.preview) {
+          URL.revokeObjectURL(item.preview);
+        }
+      });
+    },
+
+    clearCompressItems() {
+      this.compressFileList = [];
+      this.cleanupCompressObjectUrls();
+      this.compressItems = [];
+    },
+
+    handleUploadPreviewError(item) {
+      if (!item) {
+        return;
+      }
+      item.previewFailed = true;
+    },
+
+    downloadCompressedItem(item) {
+      if (!item?.file || !item?.preview) {
+        ElMessage.warning(this.t("previewUnavailable"));
+        return;
+      }
+      const anchor = document.createElement("a");
+      anchor.href = item.preview;
+      anchor.download = item.file.name || "compressed-image";
+      anchor.rel = "noopener";
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
     },
 
     async login() {
@@ -830,6 +1086,10 @@ const app = createApp({
         this.activeMonthGroups = [];
         this.tags = [];
         this.uploadResults = [];
+        this.fileList = [];
+        this.cleanupUploadObjectUrls();
+        this.uploadItems = [];
+        this.clearCompressItems();
         ElMessage.success(this.t("loggedOut"));
       }
     },
@@ -951,7 +1211,7 @@ const app = createApp({
         }
 
         this.fileList = [];
-        this.cleanupObjectUrls();
+        this.cleanupUploadObjectUrls();
         this.uploadItems = [];
         ElMessage.success(this.t("uploadDone"));
         await Promise.all([this.fetchTags(), this.fetchMyImages()]);
@@ -1142,7 +1402,8 @@ const app = createApp({
     }
   },
   beforeUnmount() {
-    this.cleanupObjectUrls();
+    this.cleanupUploadObjectUrls();
+    this.cleanupCompressObjectUrls();
   },
 });
 

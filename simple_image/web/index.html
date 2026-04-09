@@ -6,7 +6,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Simple Image</title>
   <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/exif-reader@2.0.3/index.min.js"></script>
   <link rel="stylesheet" href="static/vendor/element-plus.css" />
   <link rel="stylesheet" href="static/styles.css" />
 </head>
@@ -80,12 +79,16 @@
                       </div>
                     </template>
                   </el-upload>
+                  <p class="hint">{{ t('uploadRawHint') }}</p>
 
                   <div class="preview-list" v-if="uploadItems.length">
                     <div v-for="item in uploadItems" :key="item.uid" class="preview-item">
-                      <img :src="item.preview" alt="preview" />
+                      <img v-if="!item.previewFailed" :src="item.preview" alt="preview"
+                        @error="handleUploadPreviewError(item)" />
+                      <div v-else class="preview-fallback">{{ t('previewUnavailable') }}</div>
                       <div class="preview-meta">
                         <div class="name">{{ item.file.name }}</div>
+                        <div class="preview-size-info">{{ formatSize(item.file.size) }}</div>
                         <el-select v-model="item.tags" multiple filterable allow-create default-first-option
                           :placeholder="t('tagsCreatablePlaceholder')" style="width:100%">
                           <el-option v-for="tag in tags" :key="tag" :label="tag" :value="tag"></el-option>
@@ -122,6 +125,62 @@
                       </div>
                     </el-card>
                   </div>
+                </el-tab-pane>
+
+                <el-tab-pane :label="t('tabCompress')" name="compress">
+                  <el-upload action="" drag multiple :auto-upload="false" :on-change="onCompressFileChange"
+                    :on-remove="onCompressFileRemove" :on-exceed="onCompressExceed" :file-list="compressFileList"
+                    :limit="maxUploadCount" accept="image/*">
+                    <div class="el-upload__text">{{ t('uploadDropTextPrefix') }}<em>{{ t('uploadDropTextAction') }}</em>
+                    </div>
+                    <template #tip>
+                      <div class="el-upload__tip">{{ t('uploadTip', { count: maxUploadCount, size: maxFileSizeMB }) }}
+                      </div>
+                    </template>
+                  </el-upload>
+
+                  <div class="client-compress-panel">
+                    <div class="client-compress-header">
+                      <div>
+                        <div class="client-compress-title">{{ t('clientCompressPanelTitle') }}</div>
+                        <div class="client-compress-hint">{{ t('localCompressHint') }}</div>
+                      </div>
+                    </div>
+                    <div class="client-compress-grid">
+                      <div class="client-compress-field">
+                        <span>{{ t('clientCompressQualityLabel') }}</span>
+                        <el-slider v-model="clientCompressQuality" :min="40" :max="95" :step="1" show-input
+                          @change="refreshCompressItemsAfterOptionsChange"></el-slider>
+                      </div>
+                      <div class="client-compress-field">
+                        <span>{{ t('clientCompressMaxEdgeLabel') }}</span>
+                        <el-input-number v-model="clientCompressMaxEdge" :min="720" :max="4096" :step="160"
+                          @change="refreshCompressItemsAfterOptionsChange" controls-position="right"
+                          style="width: 100%"></el-input-number>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="preview-list" v-if="compressItems.length">
+                    <div v-for="item in compressItems" :key="item.uid" class="preview-item">
+                      <img v-if="item.preview" :src="item.preview" alt="compressed preview" />
+                      <div v-else class="preview-fallback">{{ t('previewUnavailable') }}</div>
+                      <div class="preview-meta">
+                        <div class="name">{{ item.file ? item.file.name : item.failedName }}</div>
+                        <div v-if="item.error" class="preview-error">{{ item.error }}</div>
+                        <div v-else-if="item.changed" class="preview-size-info">{{ t('previewSizeInfo', {
+                          original: formatSize(item.originalSize), compressed: formatSize(item.processedSize) }) }}</div>
+                        <div v-else class="preview-size-info">{{ formatSize(item.processedSize) }}</div>
+                        <div class="compress-actions-row">
+                          <el-button size="small" type="primary" plain :disabled="!item.file"
+                            @click="downloadCompressedItem(item)">{{ t('localDownloadAction') }}</el-button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <el-button plain :disabled="!compressItems.length" @click="clearCompressItems">{{
+                    t('localClearAction') }}</el-button>
                 </el-tab-pane>
 
                 <el-tab-pane :label="t('tabImages')" name="images">
