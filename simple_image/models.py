@@ -11,8 +11,6 @@ from sqlalchemy import (
     String,
     Table,
     create_engine,
-    inspect,
-    text,
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
@@ -82,31 +80,6 @@ class SessionToken(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
-def _get_columns(connection, table_name: str) -> set[str]:
-    rows = connection.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
-    return {row[1] for row in rows}
-
-
-def ensure_schema_compatibility(engine, default_compress_quality: int) -> None:
-    with engine.begin() as connection:
-        user_columns = _get_columns(connection, "users")
-        if "password_hash" not in user_columns:
-            connection.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR"))
-        if "is_admin" not in user_columns:
-            connection.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"))
-        if "is_active" not in user_columns:
-            connection.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
-        if "compress_enabled" not in user_columns:
-            connection.execute(text("ALTER TABLE users ADD COLUMN compress_enabled BOOLEAN NOT NULL DEFAULT 1"))
-        if "compress_quality" not in user_columns:
-            connection.execute(
-                text(
-                    "ALTER TABLE users ADD COLUMN compress_quality "
-                    f"INTEGER NOT NULL DEFAULT {default_compress_quality}"
-                )
-            )
-
-
 def _normalize_database_url(database_url: str) -> str:
     # Allow shorthand mysql:// URLs by normalizing to SQLAlchemy driver URL.
     if database_url.startswith("mysql://"):
@@ -140,9 +113,6 @@ def create_session_factory(
 
     engine = create_engine(resolved_url, **engine_kwargs)
     Base.metadata.create_all(bind=engine)
-
-    if _is_sqlite_url(resolved_url) and inspect(engine).has_table("users"):
-        ensure_schema_compatibility(engine, default_compress_quality)
 
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
