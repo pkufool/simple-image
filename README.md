@@ -6,7 +6,7 @@
 - 前端：Vue3 + Element Plus（由 FastAPI 静态托管）
 - 图片查看：公开访问
 - 图片上传与管理：必须登录
-- 登录会话：HttpOnly Cookie 承载（不再使用 localStorage token）
+- 登录会话：HttpOnly Cookie 承载
 - 用户管理：仅 admin 可新增用户、修改用户密码
 - 上传压缩策略：admin 可针对每个用户设置“是否压缩”与“压缩率”
 - iPhone 图片兼容：支持 HEIC/HEIF 上传（服务端自动转 JPEG 存储），并自动处理 EXIF 方向
@@ -74,8 +74,6 @@ simple-image serve ./runtime-data \
 - `SESSION_MAX_AGE`：默认 `604800`（7 天）
 
 ## Nginx 反向代理（部署到 /simple_image）
-
-当前前端已经支持原生子路径部署，不需要再使用 `sub_filter`。
 
 推荐将服务运行在 `127.0.0.1:8000`，并用 Nginx 挂载到 `/simple_image`：
 

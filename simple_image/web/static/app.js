@@ -41,7 +41,7 @@ const I18N_MESSAGES = {
     clientCompressPanelTitle: "前端压缩",
     clientCompressQualityLabel: "画质",
     clientCompressMaxEdgeLabel: "最长边",
-    clientCompressHint: "上传前会在浏览器中修正方向、缩放并压缩图片，能明显降低上传带宽；HEIC 仍需要本地解码，减小最长边通常会更快。",
+    clientCompressHint: "上传前会在浏览器中修正方向、缩放并压缩图片，能明显降低上传带宽。",
     localCompressHint: "此 tab 只在浏览器本地处理图片，不会上传到服务器。支持 HEIC 和 EXIF 方向修正。",
     localDownloadAction: "下载压缩结果",
     localClearAction: "清空",
@@ -153,7 +153,7 @@ const I18N_MESSAGES = {
     clientCompressPanelTitle: "Client-side compression",
     clientCompressQualityLabel: "Quality",
     clientCompressMaxEdgeLabel: "Max edge",
-    clientCompressHint: "Images are oriented, resized, and compressed in the browser before upload to reduce bandwidth. HEIC still needs local decoding, and a smaller max edge is usually faster.",
+    clientCompressHint: "Images are oriented, resized, and compressed in the browser before upload to reduce bandwidth.",
     localCompressHint: "This tab only processes images in the browser and never uploads them. Supports HEIC and EXIF orientation fixes.",
     localDownloadAction: "Download result",
     localClearAction: "Clear",
@@ -361,28 +361,15 @@ function loadImageFromBlob(blob) {
 }
 
 async function decodeImageSource(blob) {
-  if (typeof window.createImageBitmap === "function") {
-    try {
-      return await window.createImageBitmap(blob, {
-        imageOrientation: "from-image",
-        premultiplyAlpha: "none",
-        colorSpaceConversion: "default",
-      });
-    } catch (_error) {
-      try {
-        return await window.createImageBitmap(blob);
-      } catch (_error2) {
-        // Fallback below.
-      }
-    }
-  }
+  // Modern browsers (Chrome 107+, Safari 17+, Firefox 120+) apply EXIF
+  // orientation automatically when loading via <img>. Using <img> as the
+  // source ensures orientation is handled correctly regardless of browser
+  // createImageBitmap quirks.
   return loadImageFromBlob(blob);
 }
 
 function closeImageSource(imageSource) {
-  if (imageSource && typeof imageSource.close === "function") {
-    imageSource.close();
-  }
+  // No-op for HTMLImageElement; kept for API compatibility.
 }
 
 function createRenderCanvas(width, height) {
@@ -486,35 +473,16 @@ async function prepareImageForUpload(file, options = {}) {
   let outputType = getPreferredOutputType(file);
   let outputName = toOutputFilename(file.name, outputType);
 
-  if (isHeicFile(file)) {
-    if (typeof window.heic2any !== "function") {
-      throw new Error("HEIC converter not available");
-    }
-    const converted = await window.heic2any({
-      blob: file,
-      toType: shouldCompress ? "image/png" : "image/jpeg",
-      quality: toCanvasQuality(options.quality),
-    });
-    sourceBlob = Array.isArray(converted) ? converted[0] : converted;
-    outputType = "image/jpeg";
-    outputName = toJpegFilename(file.name);
-
-    if (!shouldCompress) {
-      const convertedFile = blobToFile(sourceBlob, outputName, outputType);
-      return {
-        file: convertedFile,
-        changed: true,
-        originalSize: file.size,
-        processedSize: convertedFile.size,
-      };
-    }
-  }
+  // For HEIC: rely on the browser's native decoding via <img>. Modern
+  // browsers (Safari, Chrome 107+, Firefox 120+) can decode HEIC natively.
+  // No heic2any needed — the <img> element handles it, and our
+  // decodeImageSource uses <img> which also auto-applies EXIF orientation.
 
   let imageSource = null;
   try {
     imageSource = await decodeImageSource(sourceBlob);
-    const sourceWidth = imageSource.naturalWidth || imageSource.displayWidth || imageSource.width;
-    const sourceHeight = imageSource.naturalHeight || imageSource.displayHeight || imageSource.height;
+    const sourceWidth = imageSource.naturalWidth || imageSource.width;
+    const sourceHeight = imageSource.naturalHeight || imageSource.height;
     const targetSize = shouldCompress
       ? calculateTargetDimensions(sourceWidth, sourceHeight, clampMaxEdge(options.maxEdge))
       : { width: sourceWidth, height: sourceHeight, resized: false };
