@@ -29,6 +29,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Default upload compress quality (1-95)",
     )
+    serve.add_argument(
+        "--base-path",
+        default=None,
+        help="Deploy under sub path, e.g. /simple_image",
+    )
 
     return parser
 
@@ -41,6 +46,7 @@ def run_serve(args: argparse.Namespace) -> None:
         admin_password=args.admin_password,
         default_compress_quality=args.compress_quality,
         database_url=args.database_url,
+        base_path=args.base_path,
     )
     uvicorn.run(app, host=args.host, port=args.port, reload=args.reload)
 

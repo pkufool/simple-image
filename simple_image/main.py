@@ -8,7 +8,7 @@ from typing import List, Optional
 
 from dotenv import load_dotenv
 from fastapi import Cookie, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import and_
@@ -129,15 +129,34 @@ def normalize_path_prefix(value: Optional[str]) -> str:
     return prefix.rstrip("/")
 
 
+def render_index_html(app: FastAPI) -> HTMLResponse:
+    index_file = WEB_DIR / "index.html"
+    if not index_file.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Frontend not built")
+
+    template = getattr(app.state, "index_html_template", None)
+    if template is None:
+        template = index_file.read_text(encoding="utf-8")
+        app.state.index_html_template = template
+
+    html = template.replace("__SIMPLE_IMAGE_BASE_PATH__", app.state.base_path)
+    return HTMLResponse(content=html)
+
+
 def get_public_base_url(request: Request, app: FastAPI) -> str:
     # API_URL has the highest priority when explicitly configured.
     configured = (app.state.api_url or "").rstrip("/")
     if configured:
         return configured
 
-    forwarded_prefix = normalize_path_prefix(request.headers.get("x-forwarded-prefix"))
     request_base = str(request.base_url).rstrip("/")
-    return f"{request_base}{forwarded_prefix}"
+    for prefix in (
+        normalize_path_prefix(request.headers.get("x-forwarded-prefix")),
+        normalize_path_prefix(getattr(app.state, "base_path", "")),
+    ):
+        if prefix and not request_base.endswith(prefix):
+            request_base = f"{request_base}{prefix}"
+    return request_base
 
 
 def to_user_public(user: User) -> UserPublic:
@@ -220,11 +239,16 @@ def create_app(
     admin_password: Optional[str] = None,
     default_compress_quality: Optional[int] = None,
     database_url: Optional[str] = None,
+    base_path: Optional[str] = None,
 ) -> FastAPI:
     base_data_dir = Path(data_dir) if data_dir else Path(os.getenv("SIMPLE_IMAGE_DATA_DIR", "data"))
     base_data_dir.mkdir(parents=True, exist_ok=True)
 
     default_quality = int(default_compress_quality or os.getenv("IMAGE_COMPRESS_QUALITY", 25))
+    resolved_base_path = normalize_path_prefix(
+        base_path if base_path is not None else os.getenv("SIMPLE_IMAGE_BASE_PATH") or os.getenv("BASE_PATH")
+    )
+
     app = FastAPI(title="Simple Image API")
     app.state.data_dir = base_data_dir
     app.state.images_dir = base_data_dir / "images"
@@ -236,7 +260,8 @@ def create_app(
     app.state.session_cookie_samesite = os.getenv("SESSION_COOKIE_SAMESITE", "lax")
     app.state.session_cookie_secure = os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "true"
     app.state.session_cookie_domain = os.getenv("SESSION_COOKIE_DOMAIN") or None
-    app.state.session_cookie_path = os.getenv("SESSION_COOKIE_PATH", "/")
+    app.state.base_path = resolved_base_path
+    app.state.session_cookie_path = os.getenv("SESSION_COOKIE_PATH") or (resolved_base_path or "/")
     app.state.session_max_age = int(os.getenv("SESSION_MAX_AGE", "604800"))
     app.state.database_url = database_url or os.getenv("SIMPLE_IMAGE_DATABASE_URL") or os.getenv("DATABASE_URL")
     app.state.db_path = base_data_dir / "database.db"
@@ -251,7 +276,17 @@ def create_app(
         _bootstrap_admin(app)
 
     _register_routes(app)
-    return app
+    if not resolved_base_path:
+        return app
+
+    container = FastAPI(title="Simple Image", docs_url=None, redoc_url=None, openapi_url=None)
+
+    @container.get(resolved_base_path, include_in_schema=False)
+    def _redirect_base_path_entry():
+        return RedirectResponse(url=f"{resolved_base_path}/", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+    container.mount(resolved_base_path, app)
+    return container
 
 
 def _register_routes(app: FastAPI) -> None:
@@ -748,10 +783,7 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.get("/", include_in_schema=False)
     def web_root():
-        index_file = WEB_DIR / "index.html"
-        if index_file.exists():
-            return FileResponse(str(index_file))
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Frontend not built")
+        return render_index_html(app)
 
 
     @app.get("/{full_path:path}", include_in_schema=False)
@@ -764,7 +796,7 @@ def _register_routes(app: FastAPI) -> None:
         if file_path.exists() and file_path.is_file():
             return FileResponse(str(file_path))
         if index_file.exists():
-            return FileResponse(str(index_file))
+            return render_index_html(app)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Frontend not built")
 
 

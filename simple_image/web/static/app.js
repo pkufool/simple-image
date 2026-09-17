@@ -4,6 +4,16 @@ const { ElMessage } = ElementPlus;
 axios.defaults.withCredentials = true;
 
 function resolveApiBasePath() {
+  const injected = document
+    ?.querySelector('meta[name="simple-image-base-path"]')
+    ?.getAttribute("content");
+  const normalizedInjected = String(injected || "").trim();
+  if (normalizedInjected && normalizedInjected !== "/") {
+    return normalizedInjected.endsWith("/")
+      ? normalizedInjected.slice(0, -1)
+      : normalizedInjected;
+  }
+
   const pathname = new URL(".", window.location.href).pathname;
   if (pathname === "/") {
     return "";

@@ -38,6 +38,7 @@ simple-image serve data_dir --host 0.0.0.0 --port 8000 --reload
 ```bash
 simple-image serve ./runtime-data \
   --api-url http://localhost:8000 \
+  --base-path /simple_image \
   --admin-username admin \
   --admin-password admin123456 \
   --compress-quality 25
@@ -45,7 +46,8 @@ simple-image serve ./runtime-data \
 # 使用 MySQL
 simple-image serve ./runtime-data \
   --database-url mysql+pymysql://root:password@127.0.0.1:3306/simple_image \
-  --api-url http://localhost:8000
+  --api-url http://localhost:8000 \
+  --base-path /simple_image
 ```
 
 参数说明：
@@ -59,11 +61,17 @@ simple-image serve ./runtime-data \
 - `--admin-password`: 启动时自动创建管理员密码
 - `--database-url`: 数据库连接串（未设置时默认使用 `data_dir/database.db`）
 - `--compress-quality`: 默认压缩质量（1-95）
+- `--base-path`: 子目录部署前缀，例如 `/simple_image`
 
 也可通过环境变量配置数据库：
 
 - `SIMPLE_IMAGE_DATABASE_URL`
 - `DATABASE_URL`（兼容通用部署环境）
+
+也可通过环境变量配置子目录部署前缀：
+
+- `SIMPLE_IMAGE_BASE_PATH`
+- `BASE_PATH`（兼容通用部署环境）
 
 会话 Cookie 相关环境变量：
 
@@ -75,7 +83,17 @@ simple-image serve ./runtime-data \
 
 ## Nginx 反向代理（部署到 /simple_image）
 
-推荐将服务运行在 `127.0.0.1:8000`，并用 Nginx 挂载到 `/simple_image`：
+先用子目录前缀启动服务：
+
+```bash
+simple-image serve ./runtime-data \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --base-path /simple_image \
+  --api-url https://your.domain.com/simple_image
+```
+
+然后用 Nginx 转发（保留原始 URI，不去掉 `/simple_image` 前缀）：
 
 ```nginx
 upstream simple_image_backend {
@@ -92,36 +110,15 @@ server {
     return 301 /simple_image/;
   }
 
-  # 静态资源：长期缓存（文件有版本变化时会换 URL）
-  location ^~ /simple_image/static/ {
-    proxy_pass http://simple_image_backend/static/;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    expires 30d;
-    add_header Cache-Control "public, max-age=2592000, immutable";
-  }
-
-  # 图片访问：短到中等缓存，兼顾更新可见性
-  location ^~ /simple_image/image/ {
-    proxy_pass http://simple_image_backend/image/;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    expires 1d;
-    add_header Cache-Control "public, max-age=86400";
-  }
-
-  # 其余 API + 前端入口
+  # API + 前端入口（保留 /simple_image 前缀）
   location /simple_image/ {
-    proxy_pass http://simple_image_backend/;
+    proxy_pass http://simple_image_backend;
     proxy_http_version 1.1;
 
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header X-Forwarded-Prefix /simple_image;
 
     client_max_body_size 20m;
     proxy_read_timeout 300s;
@@ -151,11 +148,16 @@ server {
 
 ### 子路径部署建议
 
-- 建议设置 `API_URL=https://your.domain.com/simple_image`，用于后端返回完整图片 URL。
-- 建议设置 `SESSION_COOKIE_PATH=/simple_image`，避免 Cookie 暴露到站点其他路径。
+- 建议同时设置 `--base-path /simple_image` 与 `--api-url https://your.domain.com/simple_image`。
+- 未显式设置 `SESSION_COOKIE_PATH` 时，程序会自动使用 `base_path` 作为 Cookie Path；你也可以手动指定。
 - 若站点启用 HTTPS，建议设置 `SESSION_COOKIE_SECURE=true`。
 - 如果图片更大或压缩耗时更高，按需增加 `client_max_body_size` 与 `proxy_read_timeout`。
 - 发布后可先执行 `nginx -t`，再 `nginx -s reload`。
+
+如果你的 Nginx 必须使用“去前缀转发”（例如 `proxy_pass http://backend/;`），可不使用 `--base-path`，改为继续设置：
+
+- `proxy_set_header X-Forwarded-Prefix /simple_image`
+- `SESSION_COOKIE_PATH=/simple_image`
 
 ## 直接用 uvicorn 启动
 

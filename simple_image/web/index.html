@@ -4,6 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="simple-image-base-path" content="__SIMPLE_IMAGE_BASE_PATH__" />
   <title>Simple Image</title>
   <link rel="stylesheet" href="static/vendor/element-plus.css" />
   <link rel="stylesheet" href="static/styles.css" />
@@ -168,7 +169,8 @@
                         <div class="name">{{ item.file ? item.file.name : item.failedName }}</div>
                         <div v-if="item.error" class="preview-error">{{ item.error }}</div>
                         <div v-else-if="item.changed" class="preview-size-info">{{ t('previewSizeInfo', {
-                          original: formatSize(item.originalSize), compressed: formatSize(item.processedSize) }) }}</div>
+                          original: formatSize(item.originalSize), compressed: formatSize(item.processedSize) }) }}
+                        </div>
                         <div v-else class="preview-size-info">{{ formatSize(item.processedSize) }}</div>
                         <div class="compress-actions-row">
                           <el-button size="small" type="primary" plain :disabled="!item.file"
