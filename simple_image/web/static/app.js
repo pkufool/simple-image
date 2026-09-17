@@ -283,7 +283,34 @@ function getFileExtension(name) {
 function isHeicFile(file) {
   const ext = getFileExtension(file?.name || "");
   const type = String(file?.type || "").toLowerCase();
-  return ext === "heic" || ext === "heif" || type === "image/heic" || type === "image/heif";
+  return ["heic", "heif"].includes(ext) || [
+    "image/heic",
+    "image/heif",
+    "image/heic-sequence",
+    "image/heif-sequence",
+  ].includes(type);
+}
+
+async function isHeifContainer(file) {
+  if (isHeicFile(file)) {
+    return true;
+  }
+  if (!file || typeof file.slice !== "function") {
+    return false;
+  }
+
+  const header = new Uint8Array(await file.slice(0, 64).arrayBuffer());
+  if (header.length < 12 || String.fromCharCode(...header.slice(4, 8)) !== "ftyp") {
+    return false;
+  }
+
+  const heifBrands = new Set(["heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1"]);
+  for (let offset = 8; offset + 4 <= header.length; offset += 4) {
+    if (heifBrands.has(String.fromCharCode(...header.slice(offset, offset + 4)))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function isJpegFile(file) {
@@ -370,12 +397,45 @@ function loadImageFromBlob(blob) {
   });
 }
 
-async function decodeImageSource(blob) {
-  // Modern browsers (Chrome 107+, Safari 17+, Firefox 120+) apply EXIF
-  // orientation automatically when loading via <img>. Using <img> as the
-  // source ensures orientation is handled correctly regardless of browser
-  // createImageBitmap quirks.
-  return loadImageFromBlob(blob);
+function loadImageWithOrientation(blob) {
+  if (typeof window.loadImage !== "function") {
+    return loadImageFromBlob(blob);
+  }
+
+  return new Promise((resolve, reject) => {
+    window.loadImage(
+      blob,
+      (image) => {
+        if (!image || image.type === "error") {
+          reject(new Error("Failed to decode image"));
+          return;
+        }
+        resolve(image);
+      },
+      { canvas: true, orientation: true }
+    );
+  });
+}
+
+async function decodeImageSource(file) {
+  let sourceBlob = file;
+  if (await isHeifContainer(file)) {
+    if (typeof window.heic2any !== "function") {
+      throw new Error("HEIC/HEIF decoder is unavailable");
+    }
+
+    const converted = await window.heic2any({
+      blob: file,
+      toType: "image/jpeg",
+      quality: 0.92,
+    });
+    sourceBlob = Array.isArray(converted) ? converted[0] : converted;
+    if (!(sourceBlob instanceof Blob)) {
+      throw new Error("Failed to convert HEIC/HEIF image");
+    }
+  }
+
+  return loadImageWithOrientation(sourceBlob);
 }
 
 function closeImageSource(imageSource) {
@@ -451,8 +511,8 @@ function clampMaxEdge(maxEdge) {
   return Math.min(MAX_CLIENT_MAX_EDGE, Math.max(MIN_CLIENT_MAX_EDGE, Math.round(value)));
 }
 
-function getPreferredOutputType(file) {
-  if (isHeicFile(file) || isJpegFile(file)) {
+function getPreferredOutputType(file, isHeif = false) {
+  if (isHeif || isJpegFile(file)) {
     return "image/jpeg";
   }
   if (isWebpFile(file)) {
@@ -467,7 +527,8 @@ function getPreferredOutputType(file) {
 async function prepareImageForUpload(file, options = {}) {
   const compressionEnabled = !!options.enabled;
   const canProcess = isCanvasProcessableImage(file);
-  const shouldNormalize = isHeicFile(file) || isJpegFile(file);
+  const isHeif = await isHeifContainer(file);
+  const shouldNormalize = isHeif || isJpegFile(file);
   const shouldCompress = compressionEnabled && canProcess;
 
   if (!shouldNormalize && !shouldCompress) {
@@ -479,18 +540,12 @@ async function prepareImageForUpload(file, options = {}) {
     };
   }
 
-  let sourceBlob = file;
-  let outputType = getPreferredOutputType(file);
+  let outputType = getPreferredOutputType(file, isHeif);
   let outputName = toOutputFilename(file.name, outputType);
-
-  // For HEIC: rely on the browser's native decoding via <img>. Modern
-  // browsers (Safari, Chrome 107+, Firefox 120+) can decode HEIC natively.
-  // No heic2any needed — the <img> element handles it, and our
-  // decodeImageSource uses <img> which also auto-applies EXIF orientation.
 
   let imageSource = null;
   try {
-    imageSource = await decodeImageSource(sourceBlob);
+    imageSource = await decodeImageSource(file);
     const sourceWidth = imageSource.naturalWidth || imageSource.width;
     const sourceHeight = imageSource.naturalHeight || imageSource.height;
     const targetSize = shouldCompress
@@ -683,6 +738,7 @@ const app = createApp({
       fileList: [],
       uploadItems: [],
       uploadResults: [],
+      uploadPreviewBuildToken: 0,
       compressFileList: [],
       compressItems: [],
       compressBuildToken: 0,
@@ -787,12 +843,12 @@ const app = createApp({
 
     async onFileChange(_file, latestFileList) {
       this.fileList = this.validateFileList(latestFileList);
-      this.syncUploadItems();
+      await this.syncUploadItems();
     },
 
     async onFileRemove(_file, latestFileList) {
       this.fileList = this.validateFileList(latestFileList, false);
-      this.syncUploadItems();
+      await this.syncUploadItems();
     },
 
     onUploadExceed() {
@@ -906,7 +962,35 @@ const app = createApp({
       }
     },
 
-    syncUploadItems() {
+    async createUploadPreview(file) {
+      const isHeif = await isHeifContainer(file);
+      if (!isHeif && !isJpegFile(file)) {
+        return URL.createObjectURL(file);
+      }
+
+      const imageSource = await decodeImageSource(file);
+      try {
+        const width = imageSource.naturalWidth || imageSource.width;
+        const height = imageSource.naturalHeight || imageSource.height;
+        if (!width || !height) {
+          throw new Error("Failed to decode image");
+        }
+
+        const canvas = createRenderCanvas(width, height);
+        const context = canvas.getContext("2d");
+        if (!context) {
+          throw new Error("Canvas 2D not available");
+        }
+        context.drawImage(imageSource, 0, 0, width, height);
+        const previewBlob = await canvasToBlob(canvas, "image/jpeg", 0.92);
+        return URL.createObjectURL(previewBlob);
+      } finally {
+        closeImageSource(imageSource);
+      }
+    },
+
+    async syncUploadItems() {
+      const currentToken = ++this.uploadPreviewBuildToken;
       const existingTags = new Map(this.uploadItems.map((item) => [item.uid, item.tags]));
       this.cleanupUploadObjectUrls();
 
@@ -916,15 +1000,32 @@ const app = createApp({
         if (!raw) {
           continue;
         }
-        nextItems.push({
+        const uploadItem = {
           uid: item.uid,
           file: raw,
-          preview: URL.createObjectURL(raw),
+          preview: "",
           tags: existingTags.get(item.uid) || [],
           previewFailed: false,
-        });
+        };
+        nextItems.push(uploadItem);
+
+        try {
+          uploadItem.preview = await this.createUploadPreview(raw);
+          if (currentToken !== this.uploadPreviewBuildToken) {
+            URL.revokeObjectURL(uploadItem.preview);
+            return;
+          }
+        } catch (_error) {
+          if (currentToken !== this.uploadPreviewBuildToken) {
+            return;
+          }
+          uploadItem.previewFailed = true;
+        }
       }
 
+      if (currentToken !== this.uploadPreviewBuildToken) {
+        return;
+      }
       this.uploadItems = nextItems;
     },
 
