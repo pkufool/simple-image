@@ -564,7 +564,7 @@ async function prepareImageForUpload(file, options = {}) {
       ? calculateTargetDimensions(sourceWidth, sourceHeight, maxEdge)
       : { width: sourceWidth, height: sourceHeight, resized: false };
 
-    const needsCanvasRender = shouldNormalize || targetSize.resized || (shouldCompress && supportsEncoderQuality(outputType));
+    const needsCanvasRender = shouldNormalize || targetSize.resized || shouldCompress;
     if (!needsCanvasRender) {
       return {
         file,

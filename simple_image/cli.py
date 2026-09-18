@@ -1,4 +1,6 @@
 import argparse
+import os
+import sys
 from pathlib import Path
 
 import uvicorn
@@ -34,11 +36,44 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Deploy under sub path, e.g. /simple_image",
     )
+    serve.add_argument(
+        "-d", "--daemon", action="store_true",
+        help="Run server as a background daemon",
+    )
 
     return parser
 
 
+def _daemonize(data_dir: Path) -> None:
+    """Double-fork to detach from the controlling terminal."""
+    data_dir.mkdir(parents=True, exist_ok=True)
+    pid_file = data_dir / "simple-image.pid"
+    log_file = data_dir / "simple-image.log"
+
+    # First fork – exit parent
+    if os.fork() > 0:
+        raise SystemExit(0)
+
+    os.setsid()
+
+    # Second fork – prevent re-acquiring a terminal
+    if os.fork() > 0:
+        raise SystemExit(0)
+
+    # Redirect stdio to log file
+    log_fd = os.open(str(log_file), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+    os.dup2(log_fd, sys.stdout.fileno())
+    os.dup2(log_fd, sys.stderr.fileno())
+    os.close(log_fd)
+
+    # Write PID file
+    pid_file.write_text(str(os.getpid()))
+
+
 def run_serve(args: argparse.Namespace) -> None:
+    if args.daemon:
+        _daemonize(args.data_dir)
+
     app = create_app(
         data_dir=args.data_dir,
         api_url=args.api_url,
