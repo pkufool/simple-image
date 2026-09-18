@@ -154,7 +154,6 @@
                     <div class="client-compress-header">
                       <div>
                         <div class="client-compress-title">{{ t('clientCompressPanelTitle') }}</div>
-                        <div class="client-compress-hint">{{ t('localCompressHint') }}</div>
                       </div>
                     </div>
                     <div class="client-compress-grid">
@@ -294,7 +293,6 @@
     </el-dialog>
 
     <el-dialog :title="t('loginDialogTitle')" v-model="loginDialogVisible" width="420px" :close-on-click-modal="false">
-      <p class="hint" style="margin-top: 0; margin-bottom: 12px;">{{ loginReason || t('loginHintDefault') }}</p>
       <el-form :model="loginForm" @submit.prevent="login" label-position="top">
         <el-form-item :label="t('usernameLabel')">
           <el-input v-model="loginForm.username" autocomplete="username"

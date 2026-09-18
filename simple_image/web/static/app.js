@@ -25,11 +25,11 @@ const MAX_UPLOAD_COUNT = 10;
 const MAX_FILE_SIZE_MB = 10;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 const DEFAULT_CLIENT_COMPRESS_ENABLED = true;
-const DEFAULT_CLIENT_COMPRESS_QUALITY = 82;
-const DEFAULT_CLIENT_MAX_EDGE = 2560;
-const MIN_CLIENT_COMPRESS_QUALITY = 40;
-const MAX_CLIENT_COMPRESS_QUALITY = 95;
-const MIN_CLIENT_MAX_EDGE = 720;
+const DEFAULT_CLIENT_COMPRESS_QUALITY = 25;
+const DEFAULT_CLIENT_MAX_EDGE = 2048;
+const MIN_CLIENT_COMPRESS_QUALITY = 5;
+const MAX_CLIENT_COMPRESS_QUALITY = 100;
+const MIN_CLIENT_MAX_EDGE = 50;
 const MAX_CLIENT_MAX_EDGE = 4096;
 
 const I18N_MESSAGES = {
@@ -44,17 +44,14 @@ const I18N_MESSAGES = {
     loginRequiredUploadTitle: "上传图片需要登录",
     loginRequiredImagesTitle: "查看图片需要登录",
     goLogin: "去登录",
-    uploadDropTextPrefix: "拖拽图片到此处，或",
+    uploadDropTextPrefix: "粘贴、拖拽图片到此处，或",
     uploadDropTextAction: "点击选择",
     uploadTip: "最多 {count} 张（超出仅保留前 {count} 张），每张不超过 {size}MB",
-    uploadRawHint: "上传 tab 会按管理员为当前用户配置的压缩质量处理后再上传。",
-    clientCompressPanelTitle: "前端压缩",
+    clientCompressPanelTitle: "压缩参数",
     clientCompressQualityLabel: "画质",
     clientCompressMaxEdgeLabel: "最长边",
-    clientCompressHint: "上传前会在浏览器中修正方向、缩放并压缩图片，能明显降低上传带宽。",
-    uploadCompressionTitle: "上传压缩",
-    uploadCompressHint: "上传前会在浏览器中修正方向并按服务端配置的 Quality {quality} 压缩；不缩放尺寸，PNG 保持 PNG 格式。",
-    localCompressHint: "此 tab 只在浏览器本地处理图片，不会上传到服务器。支持 HEIC 和 EXIF 方向修正。",
+    uploadCompressionTitle: "图片预览",
+    uploadCompressHint: "图片上传前会在浏览器中修正方向并压缩，当前压缩率为 {quality} %。",
     localDownloadAction: "下载压缩结果",
     localClearAction: "清空",
     localCompressFailed: "本地压缩失败：{name}",
@@ -70,18 +67,15 @@ const I18N_MESSAGES = {
     filterByTag: "按标签筛选",
     refreshAction: "刷新",
     emptyImages: "暂无图片",
-    pageTotal: "共 {total} 条",
     monthTitle: "{label}（{count}）",
     uploadTimeLabel: "上传时间：{time}",
     linkLabel: "链接：",
     editTagsPlaceholder: "编辑标签",
-    compressInfo: "文件大小：{original} -> {compressed}",
     downloadAction: "下载",
     deleteAction: "删除",
     confirmDeleteTitle: "确认删除该图片？",
     updateTagsAction: "更新标签",
     loginDialogTitle: "登录",
-    loginHintDefault: "登录后可进行该操作",
     usernameLabel: "用户名",
     usernamePlaceholder: "请输入用户名",
     passwordLabel: "密码",
@@ -120,7 +114,6 @@ const I18N_MESSAGES = {
     maxSelectKeep: "一次最多选择 {count} 张图片，已保留前 {count} 张",
     pastedImagesAdded: "已从剪贴板添加 {count} 张图片",
     pasteImageLimitReached: "最多上传 {count} 张图片，剪贴板中的其余图片未添加",
-    fileTooLargeRemoved: "{files} 超过 {size}MB，已移除",
     copied: "地址已复制",
     copyFailed: "复制失败，请手动复制",
     usernamePasswordRequired: "请输入用户名和密码",
@@ -167,17 +160,14 @@ const I18N_MESSAGES = {
     loginRequiredUploadTitle: "Login required to upload images",
     loginRequiredImagesTitle: "Login required to view images",
     goLogin: "Log in",
-    uploadDropTextPrefix: "Drag images here, or",
+    uploadDropTextPrefix: "Paste or drag images here, or",
     uploadDropTextAction: "click to select",
     uploadTip: "Up to {count} images (keeping first {count}); each no larger than {size}MB",
-    uploadRawHint: "Upload tab uses the compression quality configured by the administrator for the current user.",
-    clientCompressPanelTitle: "Client-side compression",
+    clientCompressPanelTitle: "Compression settings",
     clientCompressQualityLabel: "Quality",
     clientCompressMaxEdgeLabel: "Max edge",
-    clientCompressHint: "Images are oriented, resized, and compressed in the browser before upload to reduce bandwidth.",
-    uploadCompressionTitle: "Upload compression",
-    uploadCompressHint: "Images are oriented and compressed at the server-configured Quality {quality}; dimensions are not resized and PNG files remain PNG.",
-    localCompressHint: "This tab only processes images in the browser and never uploads them. Supports HEIC and EXIF orientation fixes.",
+    uploadCompressionTitle: "Image preview",
+    uploadCompressHint: "Images are oriented and compressed in the browser before upload. Current compression rate: {quality}%.",
     localDownloadAction: "Download result",
     localClearAction: "Clear",
     localCompressFailed: "Local compression failed: {name}",
@@ -193,18 +183,15 @@ const I18N_MESSAGES = {
     filterByTag: "Filter by tag",
     refreshAction: "Refresh",
     emptyImages: "No images",
-    pageTotal: "Total {total}",
     monthTitle: "{label} ({count})",
     uploadTimeLabel: "Uploaded at: {time}",
     linkLabel: "Link:",
     editTagsPlaceholder: "Edit tags",
-    compressInfo: "File size: {original} -> {compressed}",
     downloadAction: "Download",
     deleteAction: "Delete",
     confirmDeleteTitle: "Delete this image?",
     updateTagsAction: "Update tags",
     loginDialogTitle: "Login",
-    loginHintDefault: "Log in to continue",
     usernameLabel: "Username",
     usernamePlaceholder: "Enter username",
     passwordLabel: "Password",
@@ -243,7 +230,6 @@ const I18N_MESSAGES = {
     maxSelectKeep: "You can select up to {count} images; only the first {count} are kept",
     pastedImagesAdded: "Added {count} image(s) from the clipboard",
     pasteImageLimitReached: "You can upload up to {count} images; remaining clipboard images were not added",
-    fileTooLargeRemoved: "{files} exceed {size}MB and were removed",
     copied: "Link copied",
     copyFailed: "Copy failed, please copy manually",
     usernamePasswordRequired: "Please enter username and password",
