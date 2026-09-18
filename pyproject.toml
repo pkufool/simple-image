@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "simple-image"
 version = "0.1.0"
-description = "Simple image hosting app with FastAPI + Vue3"
+description = "Simple image hosting"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { text = "Apache 2.0" }
 authors = [
-  { name = "simple-image contributors" }
+  { name = "pkufool" }
 ]
 dependencies = [
   "fastapi>=0.115.0",

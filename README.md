@@ -1,53 +1,52 @@
-# simple-image
+# 简单图床
 
-一个可发布到 PyPI 的简单图床包：
+一个简单但够用的私有图床服务：
 
-- 后端：FastAPI + SQLAlchemy（支持 SQLite / MySQL）
-- 前端：Vue3 + Element Plus（由 FastAPI 静态托管）
 - 图片查看：公开访问
 - 图片上传与管理：必须登录
-- 登录会话：HttpOnly Cookie 承载
-- 用户管理：仅 admin 可新增用户、修改用户密码
-- 图片上传：浏览器会在上传前修正 EXIF 方向，并按管理员为当前用户配置的质量压缩；上传页不缩放尺寸，PNG 保持 PNG 格式
-- iPhone 图片兼容：支持 HEIC/HEIF 上传（浏览器端转 JPEG），包括扩展名错误但内容为 HEIF 的文件
-- 服务端兼容：旧客户端或未声明前端处理的请求仍由服务端处理 HEIC/HEIF 与压缩
+- 标签管理：便于图片检索分类
+- 支持前端压缩：减小空间和带宽压力
+- 用户管理：仅 admin 可新增用户、修改用户密码，克制但亦可多人共用
+- 零配置：命令行一键启动
+
+
+### 体验地址
+
+https://v.kingway.fun/simage/
+
+用户：admin
+密码：admin123456
+
+> 体验地址数据定时删除，请勿放置重要数据
+
 
 ## 安装
 
-开发环境：
-
 ```bash
-pip install -r requirements.txt
+pip install simple-image
 ```
 
-打包安装（本地）：
+
+## 启动
 
 ```bash
-pip install .
-```
-
-## 命令行启动
-
-安装后可直接使用：
-
-```bash
-simple-image serve data_dir --host 0.0.0.0 --port 8000 --reload
+simple-image serve data_dir --host 0.0.0.0 --port 8000 --daemon
 ```
 
 示例：
 
 ```bash
-simple-image serve ./runtime-data \
-  --api-url http://localhost:8000 \
+simple-image serve ./data \
+  --api-url https://your.domain.com \
   --base-path /simple_image \
   --admin-username admin \
   --admin-password admin123456 \
   --compress-quality 25
 
 # 使用 MySQL
-simple-image serve ./runtime-data \
+simple-image serve ./data \
   --database-url mysql+pymysql://root:password@127.0.0.1:3306/simple_image \
-  --api-url http://localhost:8000 \
+  --api-url https://your.domain.com \
   --base-path /simple_image
 ```
 
@@ -63,6 +62,7 @@ simple-image serve ./runtime-data \
 - `--database-url`: 数据库连接串（未设置时默认使用 `data_dir/database.db`）
 - `--compress-quality`: 默认压缩质量（1-95）
 - `--base-path`: 子目录部署前缀，例如 `/simple_image`
+- `--daemon`: 守护进程后台运行
 
 也可通过环境变量配置数据库：
 
@@ -82,12 +82,15 @@ simple-image serve ./runtime-data \
 - `SESSION_COOKIE_PATH`：默认 `/`
 - `SESSION_MAX_AGE`：默认 `604800`（7 天）
 
+
 ## Nginx 反向代理（部署到 /simple_image）
+
+> 如部署到根目录，去除 simple_image 即可
 
 先用子目录前缀启动服务：
 
 ```bash
-simple-image serve ./runtime-data \
+simple-image serve ./data \
   --host 127.0.0.1 \
   --port 8000 \
   --base-path /simple_image \
@@ -129,21 +132,6 @@ server {
     expires -1;
     add_header Cache-Control "no-store";
   }
-
-  # gzip（对文本类资源压缩，对图片无需重复压缩）
-  gzip on;
-  gzip_comp_level 5;
-  gzip_min_length 1024;
-  gzip_vary on;
-  gzip_proxied any;
-  gzip_types
-    text/plain
-    text/css
-    text/javascript
-    application/javascript
-    application/json
-    application/xml
-    image/svg+xml;
 }
 ```
 
@@ -155,23 +143,15 @@ server {
 - 如果图片更大或压缩耗时更高，按需增加 `client_max_body_size` 与 `proxy_read_timeout`。
 - 发布后可先执行 `nginx -t`，再 `nginx -s reload`。
 
-如果你的 Nginx 必须使用“去前缀转发”（例如 `proxy_pass http://backend/;`），可不使用 `--base-path`，改为继续设置：
 
-- `proxy_set_header X-Forwarded-Prefix /simple_image`
-- `SESSION_COOKIE_PATH=/simple_image`
 
-## 直接用 uvicorn 启动
+### 直接用 uvicorn 启动
 
 ```bash
 uvicorn simple_image.main:app --host 0.0.0.0 --port 8000
 ```
 
-## 浏览器访问
-
-- 首页: http://localhost:8000/
-- API 文档: http://localhost:8000/docs
-
-## 默认管理员
+### 默认管理员
 
 首次启动时若不存在管理员用户，会自动创建：
 
@@ -180,8 +160,27 @@ uvicorn simple_image.main:app --host 0.0.0.0 --port 8000
 
 建议首次登录后立刻通过管理员功能修改密码。
 
-## 目录
+### 重置管理员密码
 
-- `simple_image/`: Python 包与前端静态资源
-- `data/`: 运行数据（默认）
-- `pyproject.toml`: PyPI 打包配置
+忘记管理员密码时，可使用 `reset-admin-password` 命令重置：
+
+```bash
+simple-image reset-admin-password ./data
+```
+
+系统会自动查找唯一的 admin 用户并交互式输入新密码。如果存在多个管理员账号，需通过 `--username` 指定：
+
+```bash
+simple-image reset-admin-password ./data --username admin
+```
+
+使用 MySQL 等外部数据库时，同样支持 `--database-url`：
+
+```bash
+simple-image reset-admin-password ./data \
+  --database-url mysql+pymysql://root:password@127.0.0.1:3306/simple_image
+```
+
+## 备份
+
+只需备份 --data-dir 目录即可恢复或迁移整个服务。
