@@ -114,6 +114,19 @@ def parse_tags(tags: List[str]) -> List[str]:
     return cleaned
 
 
+def parse_upload_month(value: Optional[str], field_name: str) -> Optional[datetime]:
+    if value is None:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Invalid {field_name}") from exc
+
+
+def next_month(value: datetime) -> datetime:
+    return datetime(value.year + (value.month == 12), 1 if value.month == 12 else value.month + 1, 1)
+
+
 def image_disk_path(images_dir: Path, image_id: str, extension: str) -> Path:
     return images_dir / f"{generate_uuid_filename(image_id)}.{extension}"
 
@@ -426,6 +439,7 @@ def _register_routes(app: FastAPI) -> None:
         file: UploadFile = File(...),
         tags: Optional[str] = Form(default=None),
         data: Optional[str] = Form(default=None),
+        client_original_size: Optional[int] = Form(default=None, ge=1),
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user),
     ):
@@ -462,9 +476,15 @@ def _register_routes(app: FastAPI) -> None:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid tags payload")
 
         try:
-            original_size = len(image_data)
+            received_size = len(image_data)
+            is_client_compressed = client_original_size is not None and client_original_size != received_size
+            original_size = client_original_size if is_client_compressed else received_size
             needs_transcode = detected_extension in TRANSCODE_ONLY_EXTENSIONS
-            if current_user.compress_enabled or needs_transcode:
+            if is_client_compressed:
+                stored_data = image_data
+                compressed_size = received_size
+                upload_message = "Image uploaded with client-side compression"
+            elif current_user.compress_enabled or needs_transcode:
                 output_quality = current_user.compress_quality if current_user.compress_enabled else 95
                 compressed_data, _, compressed_size = compress_image(
                     image_data,
@@ -588,11 +608,21 @@ def _register_routes(app: FastAPI) -> None:
     def list_user_images(
         owner_id: str,
         tag: Optional[str],
+        upload_month_start: Optional[str],
+        upload_month_end: Optional[str],
         db: Session,
     ):
         query = db.query(Image).filter(Image.owner_id == owner_id)
         if tag:
             query = query.join(Image.tags).filter(and_(Tag.name == tag, Tag.owner_id == owner_id))
+        start = parse_upload_month(upload_month_start, "upload_month_start")
+        end = parse_upload_month(upload_month_end, "upload_month_end")
+        if start and end and start > end:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid upload month range")
+        if start:
+            query = query.filter(Image.upload_time >= start)
+        if end:
+            query = query.filter(Image.upload_time < next_month(end))
 
         images = query.order_by(Image.upload_time.desc()).all()
         return [
@@ -613,6 +643,8 @@ def _register_routes(app: FastAPI) -> None:
     def list_user_images_page(
         owner_id: str,
         tag: Optional[str],
+        upload_month_start: Optional[str],
+        upload_month_end: Optional[str],
         page: int,
         page_size: int,
         db: Session,
@@ -620,6 +652,14 @@ def _register_routes(app: FastAPI) -> None:
         query = db.query(Image).filter(Image.owner_id == owner_id)
         if tag:
             query = query.join(Image.tags).filter(and_(Tag.name == tag, Tag.owner_id == owner_id))
+        start = parse_upload_month(upload_month_start, "upload_month_start")
+        end = parse_upload_month(upload_month_end, "upload_month_end")
+        if start and end and start > end:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid upload month range")
+        if start:
+            query = query.filter(Image.upload_time >= start)
+        if end:
+            query = query.filter(Image.upload_time < next_month(end))
 
         total = query.count()
         offset = (page - 1) * page_size
@@ -643,39 +683,47 @@ def _register_routes(app: FastAPI) -> None:
     @app.get("/images/me", response_model=List[ImageInfo])
     def get_my_images(
         tag: Optional[str] = None,
+        upload_month_start: Optional[str] = None,
+        upload_month_end: Optional[str] = None,
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user),
     ):
-        return list_user_images(current_user.id, tag, db)
+        return list_user_images(current_user.id, tag, upload_month_start, upload_month_end, db)
 
 
     @app.get("/images/me/page", response_model=ImagePage)
     def get_my_images_page(
         tag: Optional[str] = None,
+        upload_month_start: Optional[str] = None,
+        upload_month_end: Optional[str] = None,
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=20, ge=1, le=100),
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user),
     ):
-        return list_user_images_page(current_user.id, tag, page, page_size, db)
+        return list_user_images_page(current_user.id, tag, upload_month_start, upload_month_end, page, page_size, db)
 
 
     @app.get("/images/{user_id}", response_model=List[ImageInfo])
     def get_user_images(
         user_id: str,
         tag: Optional[str] = None,
+        upload_month_start: Optional[str] = None,
+        upload_month_end: Optional[str] = None,
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user),
     ):
         if user_id != current_user.id and not current_user.is_admin:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
-        return list_user_images(user_id, tag, db)
+        return list_user_images(user_id, tag, upload_month_start, upload_month_end, db)
 
 
     @app.get("/images/{user_id}/page", response_model=ImagePage)
     def get_user_images_page(
         user_id: str,
         tag: Optional[str] = None,
+        upload_month_start: Optional[str] = None,
+        upload_month_end: Optional[str] = None,
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=20, ge=1, le=100),
         db: Session = Depends(get_db),
@@ -683,7 +731,7 @@ def _register_routes(app: FastAPI) -> None:
     ):
         if user_id != current_user.id and not current_user.is_admin:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
-        return list_user_images_page(user_id, tag, page, page_size, db)
+        return list_user_images_page(user_id, tag, upload_month_start, upload_month_end, page, page_size, db)
 
 
     @app.get("/tags/me")

@@ -21,7 +21,7 @@ function resolveApiBasePath() {
   return pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
 }
 
-const MAX_UPLOAD_COUNT = 5;
+const MAX_UPLOAD_COUNT = 10;
 const MAX_FILE_SIZE_MB = 10;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 const DEFAULT_CLIENT_COMPRESS_ENABLED = true;
@@ -47,16 +47,19 @@ const I18N_MESSAGES = {
     uploadDropTextPrefix: "拖拽图片到此处，或",
     uploadDropTextAction: "点击选择",
     uploadTip: "最多 {count} 张（超出仅保留前 {count} 张），每张不超过 {size}MB",
-    uploadRawHint: "上传 tab 会始终上传原始文件；HEIC/EXIF 转换统一交给后端处理。",
+    uploadRawHint: "上传 tab 会按管理员为当前用户配置的压缩质量处理后再上传。",
     clientCompressPanelTitle: "前端压缩",
     clientCompressQualityLabel: "画质",
     clientCompressMaxEdgeLabel: "最长边",
     clientCompressHint: "上传前会在浏览器中修正方向、缩放并压缩图片，能明显降低上传带宽。",
+    uploadCompressionTitle: "上传压缩",
+    uploadCompressHint: "上传前会在浏览器中修正方向并按服务端配置的 Quality {quality} 压缩；不缩放尺寸，PNG 保持 PNG 格式。",
     localCompressHint: "此 tab 只在浏览器本地处理图片，不会上传到服务器。支持 HEIC 和 EXIF 方向修正。",
     localDownloadAction: "下载压缩结果",
     localClearAction: "清空",
     localCompressFailed: "本地压缩失败：{name}",
     previewUnavailable: "无法预览",
+    closePreview: "关闭预览",
     tagsCreatablePlaceholder: "标签（可创建）",
     uploadSelectedAction: "上传已选图片",
     uploadSuccessSuffix: "上传成功",
@@ -71,8 +74,8 @@ const I18N_MESSAGES = {
     monthTitle: "{label}（{count}）",
     uploadTimeLabel: "上传时间：{time}",
     linkLabel: "链接：",
-    compressInfo: "压缩：{original} -> {compressed}（节省 {percent}%）",
     editTagsPlaceholder: "编辑标签",
+    compressInfo: "文件大小：{original} -> {compressed}",
     downloadAction: "下载",
     deleteAction: "删除",
     confirmDeleteTitle: "确认删除该图片？",
@@ -127,6 +130,7 @@ const I18N_MESSAGES = {
     selectImagesFirst: "请先选择图片",
     maxUploadExceeded: "一次最多上传 {count} 张图片",
     oversizedExist: "存在超过 {size}MB 的文件，请移除后再上传",
+    uploadPreparationFailed: "存在本地处理失败的图片，请移除后再上传",
     uploadDone: "上传完成",
     uploadFailed: "上传失败",
     tagsUpdated: "标签已更新",
@@ -144,6 +148,11 @@ const I18N_MESSAGES = {
     uploadSettingsSaved: "上传设置已保存",
     uploadSettingsSaveFailed: "保存上传设置失败",
     monthLabel: "{year}年{month}月",
+    compressionRateInfo: "压缩率：{rate}%",
+    localCompressUploadTip: "不限图片数量和文件大小；仅在浏览器本地处理，不会上传到服务器。",
+    uploadMonthStart: "开始月份",
+    uploadMonthEnd: "结束月份",
+    rangeSeparator: "至",
   },
   en: {
     appName: "Simple Image",
@@ -159,16 +168,19 @@ const I18N_MESSAGES = {
     uploadDropTextPrefix: "Drag images here, or",
     uploadDropTextAction: "click to select",
     uploadTip: "Up to {count} images (keeping first {count}); each no larger than {size}MB",
-    uploadRawHint: "Upload tab always sends original files. HEIC/EXIF conversion is handled by the server.",
+    uploadRawHint: "Upload tab uses the compression quality configured by the administrator for the current user.",
     clientCompressPanelTitle: "Client-side compression",
     clientCompressQualityLabel: "Quality",
     clientCompressMaxEdgeLabel: "Max edge",
     clientCompressHint: "Images are oriented, resized, and compressed in the browser before upload to reduce bandwidth.",
+    uploadCompressionTitle: "Upload compression",
+    uploadCompressHint: "Images are oriented and compressed at the server-configured Quality {quality}; dimensions are not resized and PNG files remain PNG.",
     localCompressHint: "This tab only processes images in the browser and never uploads them. Supports HEIC and EXIF orientation fixes.",
     localDownloadAction: "Download result",
     localClearAction: "Clear",
     localCompressFailed: "Local compression failed: {name}",
     previewUnavailable: "Preview unavailable",
+    closePreview: "Close preview",
     tagsCreatablePlaceholder: "Tags (creatable)",
     uploadSelectedAction: "Upload selected images",
     uploadSuccessSuffix: "uploaded successfully",
@@ -183,8 +195,8 @@ const I18N_MESSAGES = {
     monthTitle: "{label} ({count})",
     uploadTimeLabel: "Uploaded at: {time}",
     linkLabel: "Link:",
-    compressInfo: "Compression: {original} -> {compressed} (saved {percent}%)",
     editTagsPlaceholder: "Edit tags",
+    compressInfo: "File size: {original} -> {compressed}",
     downloadAction: "Download",
     deleteAction: "Delete",
     confirmDeleteTitle: "Delete this image?",
@@ -239,6 +251,7 @@ const I18N_MESSAGES = {
     selectImagesFirst: "Please select images first",
     maxUploadExceeded: "You can upload up to {count} images at once",
     oversizedExist: "Some files exceed {size}MB, please remove them before upload",
+    uploadPreparationFailed: "Some images could not be processed locally. Remove them before uploading.",
     uploadDone: "Upload completed",
     uploadFailed: "Upload failed",
     tagsUpdated: "Tags updated",
@@ -256,6 +269,11 @@ const I18N_MESSAGES = {
     uploadSettingsSaved: "Upload settings saved",
     uploadSettingsSaveFailed: "Failed to save upload settings",
     monthLabel: "{year}-{month}",
+    compressionRateInfo: "Compression rate: {rate}%",
+    localCompressUploadTip: "No image-count or file-size limit. Processing is local and never uploads files.",
+    uploadMonthStart: "Start month",
+    uploadMonthEnd: "End month",
+    rangeSeparator: "to",
   },
 };
 
@@ -504,6 +522,9 @@ function toCanvasQuality(quality) {
 }
 
 function clampMaxEdge(maxEdge) {
+  if (maxEdge === null || maxEdge === undefined || maxEdge === "") {
+    return null;
+  }
   const value = Number(maxEdge);
   if (!Number.isFinite(value)) {
     return DEFAULT_CLIENT_MAX_EDGE;
@@ -548,8 +569,9 @@ async function prepareImageForUpload(file, options = {}) {
     imageSource = await decodeImageSource(file);
     const sourceWidth = imageSource.naturalWidth || imageSource.width;
     const sourceHeight = imageSource.naturalHeight || imageSource.height;
-    const targetSize = shouldCompress
-      ? calculateTargetDimensions(sourceWidth, sourceHeight, clampMaxEdge(options.maxEdge))
+    const maxEdge = clampMaxEdge(options.maxEdge);
+    const targetSize = shouldCompress && maxEdge
+      ? calculateTargetDimensions(sourceWidth, sourceHeight, maxEdge)
       : { width: sourceWidth, height: sourceHeight, resized: false };
 
     const needsCanvasRender = shouldNormalize || targetSize.resized || (shouldCompress && supportsEncoderQuality(outputType));
@@ -731,6 +753,7 @@ const app = createApp({
       monthGroups: [],
       activeMonthGroups: [],
       imageFilterTag: "",
+      imageFilterMonths: [],
       imagePage: 1,
       imagePageSize: 20,
       imageTotal: 0,
@@ -744,10 +767,22 @@ const app = createApp({
       compressBuildToken: 0,
       clientCompressQuality: DEFAULT_CLIENT_COMPRESS_QUALITY,
       clientCompressMaxEdge: DEFAULT_CLIENT_MAX_EDGE,
+      imagePreviewVisible: false,
+      imagePreviewUrl: "",
+      imagePreviewName: "",
 
       maxUploadCount: MAX_UPLOAD_COUNT,
       maxFileSizeMB: MAX_FILE_SIZE_MB,
     };
+  },
+  computed: {
+    userUploadQuality() {
+      const quality = Number(this.user?.compress_quality);
+      if (!Number.isFinite(quality)) {
+        return DEFAULT_CLIENT_COMPRESS_QUALITY;
+      }
+      return Math.min(MAX_CLIENT_COMPRESS_QUALITY, Math.max(1, Math.round(quality)));
+    },
   },
   methods: {
     t(key, params = {}) {
@@ -790,6 +825,19 @@ const app = createApp({
     onImageFilterChange() {
       this.imagePage = 1;
       this.fetchMyImages();
+    },
+
+    compressionRate(originalSize, processedSize) {
+      if (!originalSize || originalSize <= 0 || !Number.isFinite(processedSize)) {
+        return 100;
+      }
+      return Math.max(0, Math.round((processedSize / originalSize) * 100));
+    },
+
+    openImagePreview(url, name) {
+      this.imagePreviewUrl = url;
+      this.imagePreviewName = name || "";
+      this.imagePreviewVisible = true;
     },
 
     onImagePageChange(page) {
@@ -856,12 +904,12 @@ const app = createApp({
     },
 
     async onCompressFileChange(_file, latestFileList) {
-      this.compressFileList = this.validateFileList(latestFileList);
+      this.compressFileList = this.validateFileList(latestFileList, false, false);
       await this.syncCompressItems();
     },
 
     async onCompressFileRemove(_file, latestFileList) {
-      this.compressFileList = this.validateFileList(latestFileList, false);
+      this.compressFileList = this.validateFileList(latestFileList, false, false);
       await this.syncCompressItems();
     },
 
@@ -876,6 +924,13 @@ const app = createApp({
       await this.syncCompressItems();
     },
 
+    async refreshUploadItemsAfterOptionsChange() {
+      if (!this.fileList.length) {
+        return;
+      }
+      await this.syncUploadItems();
+    },
+
     buildClientCompressionOptions() {
       return {
         enabled: true,
@@ -884,11 +939,11 @@ const app = createApp({
       };
     },
 
-    validateFileList(fileList, showMessage = true) {
+    validateFileList(fileList, showMessage = true, limitCount = true) {
       const valid = [];
 
       for (const item of fileList || []) {
-        if (valid.length >= this.maxUploadCount) {
+        if (limitCount && valid.length >= this.maxUploadCount) {
           continue;
         }
         const raw = item?.raw;
@@ -899,7 +954,7 @@ const app = createApp({
       }
 
       if (showMessage) {
-        if ((fileList || []).length > this.maxUploadCount) {
+        if (limitCount && (fileList || []).length > this.maxUploadCount) {
           ElMessage.error(this.t("maxSelectKeep", { count: this.maxUploadCount }));
         }
       }
@@ -962,33 +1017,6 @@ const app = createApp({
       }
     },
 
-    async createUploadPreview(file) {
-      const isHeif = await isHeifContainer(file);
-      if (!isHeif && !isJpegFile(file)) {
-        return URL.createObjectURL(file);
-      }
-
-      const imageSource = await decodeImageSource(file);
-      try {
-        const width = imageSource.naturalWidth || imageSource.width;
-        const height = imageSource.naturalHeight || imageSource.height;
-        if (!width || !height) {
-          throw new Error("Failed to decode image");
-        }
-
-        const canvas = createRenderCanvas(width, height);
-        const context = canvas.getContext("2d");
-        if (!context) {
-          throw new Error("Canvas 2D not available");
-        }
-        context.drawImage(imageSource, 0, 0, width, height);
-        const previewBlob = await canvasToBlob(canvas, "image/jpeg", 0.92);
-        return URL.createObjectURL(previewBlob);
-      } finally {
-        closeImageSource(imageSource);
-      }
-    },
-
     async syncUploadItems() {
       const currentToken = ++this.uploadPreviewBuildToken;
       const existingTags = new Map(this.uploadItems.map((item) => [item.uid, item.tags]));
@@ -1000,26 +1028,42 @@ const app = createApp({
         if (!raw) {
           continue;
         }
-        const uploadItem = {
-          uid: item.uid,
-          file: raw,
-          preview: "",
-          tags: existingTags.get(item.uid) || [],
-          previewFailed: false,
-        };
-        nextItems.push(uploadItem);
-
         try {
-          uploadItem.preview = await this.createUploadPreview(raw);
+          const prepared = await prepareImageForUpload(raw, {
+            enabled: !!this.user?.compress_enabled,
+            quality: this.userUploadQuality,
+            maxEdge: null,
+          });
           if (currentToken !== this.uploadPreviewBuildToken) {
-            URL.revokeObjectURL(uploadItem.preview);
             return;
           }
+          nextItems.push({
+            uid: item.uid,
+            file: prepared.file,
+            preview: URL.createObjectURL(prepared.file),
+            tags: existingTags.get(item.uid) || [],
+            previewFailed: false,
+            originalSize: prepared.originalSize,
+            processedSize: prepared.processedSize,
+            changed: prepared.changed,
+            error: "",
+          });
         } catch (_error) {
           if (currentToken !== this.uploadPreviewBuildToken) {
             return;
           }
-          uploadItem.previewFailed = true;
+          nextItems.push({
+            uid: item.uid,
+            file: null,
+            preview: "",
+            tags: existingTags.get(item.uid) || [],
+            previewFailed: true,
+            originalSize: raw.size,
+            processedSize: raw.size,
+            changed: false,
+            error: this.t("localCompressFailed", { name: raw.name || "Unnamed file" }),
+            failedName: raw.name || "Unnamed file",
+          });
         }
       }
 
@@ -1181,6 +1225,9 @@ const app = createApp({
 
     async onAuthenticated() {
       await Promise.all([this.fetchTags(), this.fetchMyImages()]);
+      if (this.fileList.length) {
+        await this.syncUploadItems();
+      }
       if (this.user && this.user.is_admin) {
         await this.loadUsers();
       }
@@ -1218,6 +1265,8 @@ const app = createApp({
         const res = await axios.get(`${this.apiBase}/images/me/page`, {
           params: {
             ...(this.imageFilterTag ? { tag: this.imageFilterTag } : {}),
+            ...(this.imageFilterMonths?.[0] ? { upload_month_start: this.imageFilterMonths[0] } : {}),
+            ...(this.imageFilterMonths?.[1] ? { upload_month_end: this.imageFilterMonths[1] } : {}),
             page: this.imagePage,
             page_size: this.imagePageSize,
           },
@@ -1264,6 +1313,11 @@ const app = createApp({
         return;
       }
 
+      if (this.uploadItems.some((item) => !item?.file || item.error)) {
+        ElMessage.error(this.t("uploadPreparationFailed"));
+        return;
+      }
+
       const oversized = this.uploadItems.find((item) => item?.file?.size > MAX_FILE_SIZE_BYTES);
       if (oversized) {
         ElMessage.error(this.t("oversizedExist", { size: this.maxFileSizeMB }));
@@ -1277,6 +1331,7 @@ const app = createApp({
           const form = new FormData();
           form.append("file", item.file);
           form.append("tags", JSON.stringify(item.tags || []));
+          form.append("client_original_size", String(item.originalSize));
 
           const res = await axios.post(`${this.apiBase}/upload`, form, {
             headers: {

@@ -79,18 +79,30 @@
                       </div>
                     </template>
                   </el-upload>
-                  <p class="hint">{{ t('uploadRawHint') }}</p>
+                  <div class="client-compress-panel">
+                    <div class="client-compress-header">
+                      <div>
+                        <div class="client-compress-title">{{ t('uploadCompressionTitle') }}</div>
+                        <div class="client-compress-hint">{{ t('uploadCompressHint', { quality: userUploadQuality }) }}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
 
                   <div class="preview-list" v-if="uploadItems.length">
                     <div v-for="item in uploadItems" :key="item.uid" class="preview-item">
-                      <img v-if="!item.previewFailed" :src="item.preview" alt="preview"
+                      <img v-if="item.preview && !item.previewFailed" :src="item.preview" alt="preview"
                         @error="handleUploadPreviewError(item)" />
                       <div v-else class="preview-fallback">{{ t('previewUnavailable') }}</div>
                       <div class="preview-meta">
-                        <div class="name">{{ item.file.name }}</div>
-                        <div class="preview-size-info">{{ formatSize(item.file.size) }}</div>
+                        <div class="name">{{ item.file ? item.file.name : item.failedName }}</div>
+                        <div v-if="item.error" class="preview-error">{{ item.error }}</div>
+                        <div v-else-if="item.changed" class="preview-size-info">{{ t('previewSizeInfo', {
+                          original: formatSize(item.originalSize), compressed: formatSize(item.processedSize) }) }}
+                        </div>
+                        <div v-else class="preview-size-info">{{ formatSize(item.processedSize) }}</div>
                         <el-select v-model="item.tags" multiple filterable allow-create default-first-option
-                          :placeholder="t('tagsCreatablePlaceholder')" style="width:100%">
+                          :placeholder="t('tagsCreatablePlaceholder')" style="width:100%" :disabled="!!item.error">
                           <el-option v-for="tag in tags" :key="tag" :label="tag" :value="tag"></el-option>
                         </el-select>
                       </div>
@@ -104,10 +116,11 @@
                   <div v-if="uploadResults.length" class="upload-result-list">
                     <el-card v-for="res in uploadResults" :key="res.id" class="upload-result-card" shadow="never">
                       <div class="upload-result-row">
-                        <a :href="imageUrl(res.id)" target="_blank" rel="noopener">
+                        <button class="preview-image-button upload-result-preview-button" type="button"
+                          @click="openImagePreview(imageUrl(res.id), res.filename)">
                           <lazy-thumb wrapper-class="upload-result-thumb" :src="thumbnailUrl(res.id, 144)"
                             :alt="res.filename"></lazy-thumb>
-                        </a>
+                        </button>
                         <div class="upload-result-main">
                           <div class="upload-result-title">{{ res.filename }} {{ t('uploadSuccessSuffix') }}</div>
                           <div class="upload-result-filename">{{ t('originalFilenameLabel', { name: res.filename }) }}
@@ -129,13 +142,11 @@
 
                 <el-tab-pane :label="t('tabCompress')" name="compress">
                   <el-upload action="" drag multiple :auto-upload="false" :on-change="onCompressFileChange"
-                    :on-remove="onCompressFileRemove" :on-exceed="onCompressExceed" :file-list="compressFileList"
-                    :limit="maxUploadCount" accept="image/*">
+                    :on-remove="onCompressFileRemove" :file-list="compressFileList" accept="image/*">
                     <div class="el-upload__text">{{ t('uploadDropTextPrefix') }}<em>{{ t('uploadDropTextAction') }}</em>
                     </div>
                     <template #tip>
-                      <div class="el-upload__tip">{{ t('uploadTip', { count: maxUploadCount, size: maxFileSizeMB }) }}
-                      </div>
+                      <div class="el-upload__tip">{{ t('localCompressUploadTip') }}</div>
                     </template>
                   </el-upload>
 
@@ -161,9 +172,12 @@
                     </div>
                   </div>
 
-                  <div class="preview-list" v-if="compressItems.length">
-                    <div v-for="item in compressItems" :key="item.uid" class="preview-item">
-                      <img v-if="item.preview" :src="item.preview" alt="compressed preview" />
+                  <div class="preview-list compress-preview-list" v-if="compressItems.length">
+                    <div v-for="item in compressItems" :key="item.uid" class="preview-item compress-preview-item">
+                      <button v-if="item.preview" class="preview-image-button" type="button"
+                        @click="openImagePreview(item.preview, item.file?.name || item.failedName)">
+                        <img :src="item.preview" alt="compressed preview" />
+                      </button>
                       <div v-else class="preview-fallback">{{ t('previewUnavailable') }}</div>
                       <div class="preview-meta">
                         <div class="name">{{ item.file ? item.file.name : item.failedName }}</div>
@@ -171,6 +185,8 @@
                         <div v-else-if="item.changed" class="preview-size-info">{{ t('previewSizeInfo', {
                           original: formatSize(item.originalSize), compressed: formatSize(item.processedSize) }) }}
                         </div>
+                        <div v-if="!item.error" class="preview-size-info">{{ t('compressionRateInfo', {
+                          rate: compressionRate(item.originalSize, item.processedSize) }) }}</div>
                         <div v-else class="preview-size-info">{{ formatSize(item.processedSize) }}</div>
                         <div class="compress-actions-row">
                           <el-button size="small" type="primary" plain :disabled="!item.file"
@@ -194,13 +210,19 @@
                   </el-alert>
 
                   <el-row :gutter="8" style="margin-bottom: 12px;">
-                    <el-col :span="18">
+                    <el-col :xs="24" :sm="10" :md="9">
                       <el-select v-model="imageFilterTag" clearable filterable :placeholder="t('filterByTag')"
                         style="width: 100%" @change="onImageFilterChange" :disabled="!user">
                         <el-option v-for="tag in tags" :key="tag" :label="tag" :value="tag"></el-option>
                       </el-select>
                     </el-col>
-                    <el-col :span="6">
+                    <el-col :xs="24" :sm="10" :md="9">
+                      <el-date-picker v-model="imageFilterMonths" type="monthrange" value-format="YYYY-MM"
+                        :start-placeholder="t('uploadMonthStart')" :end-placeholder="t('uploadMonthEnd')"
+                        :range-separator="t('rangeSeparator')" style="width: 100%" :disabled="!user"
+                        @change="onImageFilterChange"></el-date-picker>
+                    </el-col>
+                    <el-col :xs="24" :sm="4" :md="6">
                       <el-button style="width:100%" :loading="imagesLoading" @click="fetchMyImages">{{
                         t('refreshAction') }}</el-button>
                     </el-col>
@@ -217,10 +239,11 @@
                       <div class="image-row-list">
                         <el-card v-for="img in group.items" :key="img.id" class="image-row-card" shadow="never">
                           <div class="image-row">
-                            <a :href="imageUrl(img.id)" target="_blank" rel="noopener">
+                            <button class="preview-image-button image-row-thumb-button" type="button"
+                              @click="openImagePreview(imageUrl(img.id), img.filename)">
                               <lazy-thumb wrapper-class="image-row-thumb" :src="thumbnailUrl(img.id, 160)"
                                 :alt="img.filename"></lazy-thumb>
-                            </a>
+                            </button>
                             <div class="image-row-content">
                               <h4>{{ img.filename }}</h4>
                               <p>{{ t('uploadTimeLabel', { time: formatDate(img.upload_time) }) }}</p>
@@ -237,10 +260,6 @@
                                   </template>
                                 </el-popconfirm>
                               </div>
-                              <p>
-                                {{ t('compressInfo', { original: formatSize(img.original_size), compressed:
-                                formatSize(img.compressed_size), percent: savePercent(img) }) }}
-                              </p>
                               <div class="tag-edit-row">
                                 <el-select v-model="img._editTags" multiple filterable allow-create default-first-option
                                   :placeholder="t('editTagsPlaceholder')" class="tag-select">
@@ -266,6 +285,13 @@
         </el-row>
       </el-main>
     </el-container>
+
+    <el-dialog v-model="imagePreviewVisible" class="image-preview-dialog" fullscreen :show-close="false"
+      :close-on-click-modal="true" :close-on-press-escape="true">
+      <button class="image-preview-close" type="button" @click="imagePreviewVisible = false"
+        :aria-label="t('closePreview')">&times;</button>
+      <img v-if="imagePreviewUrl" class="image-preview-full" :src="imagePreviewUrl" :alt="imagePreviewName" />
+    </el-dialog>
 
     <el-dialog :title="t('loginDialogTitle')" v-model="loginDialogVisible" width="420px" :close-on-click-modal="false">
       <p class="hint" style="margin-top: 0; margin-bottom: 12px;">{{ loginReason || t('loginHintDefault') }}</p>
