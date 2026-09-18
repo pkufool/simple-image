@@ -757,6 +757,8 @@ const app = createApp({
       compressBuildToken: 0,
       clientCompressQuality: DEFAULT_CLIENT_COMPRESS_QUALITY,
       clientCompressMaxEdge: DEFAULT_CLIENT_MAX_EDGE,
+      compressBaselineQuality: DEFAULT_CLIENT_COMPRESS_QUALITY,
+      compressBaselineMaxEdge: DEFAULT_CLIENT_MAX_EDGE,
       imagePreviewVisible: false,
       imagePreviewUrl: "",
       imagePreviewName: "",
@@ -772,6 +774,10 @@ const app = createApp({
         return DEFAULT_CLIENT_COMPRESS_QUALITY;
       }
       return Math.min(MAX_CLIENT_COMPRESS_QUALITY, Math.max(1, Math.round(quality)));
+    },
+    compressOptionsChanged() {
+      return this.clientCompressQuality !== this.compressBaselineQuality
+        || this.clientCompressMaxEdge !== this.compressBaselineMaxEdge;
     },
   },
   methods: {
@@ -959,6 +965,8 @@ const app = createApp({
         return;
       }
       await this.syncCompressItems();
+      this.compressBaselineQuality = this.clientCompressQuality;
+      this.compressBaselineMaxEdge = this.clientCompressMaxEdge;
     },
 
     async refreshUploadItemsAfterOptionsChange() {
