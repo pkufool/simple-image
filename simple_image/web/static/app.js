@@ -118,6 +118,8 @@ const I18N_MESSAGES = {
     needLoginImages: "查看图片需要登录",
     maxSelectCount: "一次最多选择 {count} 张图片",
     maxSelectKeep: "一次最多选择 {count} 张图片，已保留前 {count} 张",
+    pastedImagesAdded: "已从剪贴板添加 {count} 张图片",
+    pasteImageLimitReached: "最多上传 {count} 张图片，剪贴板中的其余图片未添加",
     fileTooLargeRemoved: "{files} 超过 {size}MB，已移除",
     copied: "地址已复制",
     copyFailed: "复制失败，请手动复制",
@@ -239,6 +241,8 @@ const I18N_MESSAGES = {
     needLoginImages: "Login required to view images",
     maxSelectCount: "You can select up to {count} images at once",
     maxSelectKeep: "You can select up to {count} images; only the first {count} are kept",
+    pastedImagesAdded: "Added {count} image(s) from the clipboard",
+    pasteImageLimitReached: "You can upload up to {count} images; remaining clipboard images were not added",
     fileTooLargeRemoved: "{files} exceed {size}MB and were removed",
     copied: "Link copied",
     copyFailed: "Copy failed, please copy manually",
@@ -903,6 +907,53 @@ const app = createApp({
       ElMessage.error(this.t("maxSelectCount", { count: this.maxUploadCount }));
     },
 
+    isTextInputTarget(target) {
+      const element = target instanceof Element ? target : null;
+      return !!element?.closest('input, textarea, [contenteditable="true"], [contenteditable=""]');
+    },
+
+    async handlePaste(event) {
+      if (!["upload", "compress"].includes(this.activeTab) || this.isTextInputTarget(event.target)) {
+        return;
+      }
+
+      const files = Array.from(event.clipboardData?.items || [])
+        .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+        .map((item) => item.getAsFile())
+        .filter(Boolean);
+      if (!files.length) {
+        return;
+      }
+
+      event.preventDefault();
+      const isUpload = this.activeTab === "upload";
+      const remaining = isUpload ? Math.max(0, this.maxUploadCount - this.fileList.length) : files.length;
+      const pasted = files.slice(0, remaining).map((file, index) => ({
+        name: file.name || `clipboard-${Date.now()}-${index}.png`,
+        percentage: 0,
+        raw: file,
+        size: file.size,
+        status: "ready",
+        uid: `clipboard-${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`,
+      }));
+      if (!pasted.length) {
+        ElMessage.error(this.t("pasteImageLimitReached", { count: this.maxUploadCount }));
+        return;
+      }
+
+      if (isUpload) {
+        this.fileList = [...this.fileList, ...pasted];
+        await this.syncUploadItems();
+      } else {
+        this.compressFileList = [...this.compressFileList, ...pasted];
+        await this.syncCompressItems();
+      }
+      ElMessage.success(this.t("pastedImagesAdded", { count: pasted.length }));
+      if (isUpload && pasted.length < files.length) {
+        ElMessage.warning(this.t("pasteImageLimitReached", { count: this.maxUploadCount }));
+      }
+    },
+
     async onCompressFileChange(_file, latestFileList) {
       this.compressFileList = this.validateFileList(latestFileList, false, false);
       await this.syncCompressItems();
@@ -1526,6 +1577,7 @@ const app = createApp({
     },
   },
   async mounted() {
+    window.addEventListener("paste", this.handlePaste);
     await this.init();
     const boot = document.getElementById("app-boot");
     if (boot) {
@@ -1536,6 +1588,7 @@ const app = createApp({
     }
   },
   beforeUnmount() {
+    window.removeEventListener("paste", this.handlePaste);
     this.cleanupUploadObjectUrls();
     this.cleanupCompressObjectUrls();
   },
