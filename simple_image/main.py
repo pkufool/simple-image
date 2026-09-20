@@ -131,6 +131,19 @@ def image_disk_path(images_dir: Path, image_id: str, extension: str) -> Path:
     return images_dir / f"{generate_uuid_filename(image_id)}.{extension}"
 
 
+def find_image_file(images_dir: Path, image_id: str) -> Optional[Path]:
+    """Locate an image on disk by scanning the directory, skipping the database."""
+    base = images_dir / generate_uuid_filename(image_id)
+    parent = base.parent
+    if not parent.is_dir():
+        return None
+    stem = base.name
+    for entry in parent.iterdir():
+        if entry.is_file() and entry.stem == stem and entry.suffix.lstrip(".") in ALLOWED_EXTENSIONS:
+            return entry
+    return None
+
+
 def normalize_path_prefix(value: Optional[str]) -> str:
     if not value:
         return ""
@@ -543,16 +556,21 @@ def _register_routes(app: FastAPI) -> None:
 
 
     @app.get("/image/{image_uuid}", response_class=FileResponse)
-    def get_image(image_uuid: str, db: Session = Depends(get_db)):
-        db_image = db.query(Image).filter(Image.id == image_uuid).first()
-        if not db_image:
+    def get_image(image_uuid: str):
+        image_path = find_image_file(app.state.images_dir, image_uuid)
+        if not image_path:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
-
-        image_path = image_disk_path(app.state.images_dir, db_image.id, db_image.file_extension)
-        if not image_path.exists():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image file not found")
-        media_type = IMAGE_MEDIA_TYPES.get(normalize_image_extension(db_image.file_extension), "application/octet-stream")
+        ext = normalize_image_extension(image_path.suffix.lstrip("."))
+        media_type = IMAGE_MEDIA_TYPES.get(ext, "application/octet-stream")
         return FileResponse(path=image_path, media_type=media_type)
+        # db_image = db.query(Image).filter(Image.id == image_uuid).first()
+        # if not db_image:
+        #     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+        # image_path = image_disk_path(app.state.images_dir, db_image.id, db_image.file_extension)
+        # if not image_path.exists():
+        #     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image file not found")
+        # media_type = IMAGE_MEDIA_TYPES.get(normalize_image_extension(db_image.file_extension), "application/octet-stream")
+        # return FileResponse(path=image_path, media_type=media_type)
 
 
     @app.get("/download/{image_uuid}")
@@ -580,15 +598,10 @@ def _register_routes(app: FastAPI) -> None:
         image_uuid: str,
         size: int = Query(default=160, ge=48, le=512),
         quality: int = Query(default=75, ge=40, le=95),
-        db: Session = Depends(get_db),
     ):
-        db_image = db.query(Image).filter(Image.id == image_uuid).first()
-        if not db_image:
+        image_path = find_image_file(app.state.images_dir, image_uuid)
+        if not image_path:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
-
-        image_path = image_disk_path(app.state.images_dir, db_image.id, db_image.file_extension)
-        if not image_path.exists():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image file not found")
 
         try:
             with open(image_path, "rb") as source_file:
@@ -600,8 +613,14 @@ def _register_routes(app: FastAPI) -> None:
         return Response(
             content=thumbnail_data,
             media_type="image/jpeg",
-            headers={"Cache-Control": "public, max-age=86400"},
+            headers={"Cache-Control": "public, max-age=2592000"},
         )
+        # db_image = db.query(Image).filter(Image.id == image_uuid).first()
+        # if not db_image:
+        #     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+        # image_path = image_disk_path(app.state.images_dir, db_image.id, db_image.file_extension)
+        # if not image_path.exists():
+        #     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image file not found")
 
 
     def list_user_images(
