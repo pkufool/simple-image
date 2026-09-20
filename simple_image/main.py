@@ -227,6 +227,8 @@ def _bootstrap_admin(app: FastAPI) -> None:
     try:
         admin = db.query(User).filter(User.username == app.state.admin_username).first()
         if admin:
+            admin.password_hash = hash_password(app.state.admin_password)
+            db.commit()
             return
         db.add(
             User(

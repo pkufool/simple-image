@@ -6,7 +6,7 @@ from pathlib import Path
 
 import uvicorn
 
-from .main import create_app, hash_password
+from .main import _bootstrap_admin, create_app, hash_password
 from .models import DEFAULT_COMPRESS_QUALITY, User, create_session_factory
 
 
@@ -100,6 +100,7 @@ def run_serve(args: argparse.Namespace) -> None:
         database_url=args.database_url,
         base_path=args.base_path,
     )
+    _bootstrap_admin(app)
     uvicorn.run(app, host=args.host, port=args.port, reload=args.reload)
 
 
