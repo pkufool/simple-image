@@ -286,10 +286,7 @@ def create_app(
         db_path=None if app.state.database_url else app.state.db_path,
     )
 
-    @app.on_event("startup")
-    def _startup_bootstrap_admin() -> None:
-        _bootstrap_admin(app)
-
+    _bootstrap_admin(app)
     _register_routes(app)
     if not resolved_base_path:
         return app
