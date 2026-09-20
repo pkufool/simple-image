@@ -1,5 +1,6 @@
 import hashlib
 import json
+import mimetypes
 import os
 import secrets
 from datetime import datetime
@@ -9,7 +10,7 @@ from typing import List, Optional
 from dotenv import load_dotenv
 from fastapi import Cookie, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
+
 from pydantic import BaseModel, Field
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
@@ -562,7 +563,7 @@ def _register_routes(app: FastAPI) -> None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
         ext = normalize_image_extension(image_path.suffix.lstrip("."))
         media_type = IMAGE_MEDIA_TYPES.get(ext, "application/octet-stream")
-        return FileResponse(path=image_path, media_type=media_type)
+        return FileResponse(path=image_path, media_type=media_type, headers={"Cache-Control": "public, max-age=2592000"})
         # db_image = db.query(Image).filter(Image.id == image_uuid).first()
         # if not db_image:
         #     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
@@ -844,7 +845,18 @@ def _register_routes(app: FastAPI) -> None:
     if WEB_DIR.exists():
         static_dir = WEB_DIR / "static"
         if static_dir.exists():
-            app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+            @app.get("/static/{file_path:path}", include_in_schema=False)
+            def static_file(file_path: str):
+                full_path = static_dir / file_path
+                if not full_path.exists() or not full_path.is_file():
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+                media_type = mimetypes.guess_type(str(full_path))[0]
+                return FileResponse(
+                    path=full_path,
+                    media_type=media_type,
+                    headers={"Cache-Control": "public, max-age=604800"},
+                )
 
 
     @app.get("/", include_in_schema=False)

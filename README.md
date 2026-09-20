@@ -129,10 +129,6 @@ server {
     client_max_body_size 20m;
     proxy_read_timeout 300s;
     proxy_send_timeout 300s;
-
-    # HTML 与 API 响应不建议长期缓存
-    expires -1;
-    add_header Cache-Control "no-store";
   }
 }
 ```
