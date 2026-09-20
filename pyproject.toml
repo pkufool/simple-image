@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "simple-image"
+name = "simple-image-hosting"
 version = "0.1.1"
 description = "Simple image hosting"
 readme = "README.md"

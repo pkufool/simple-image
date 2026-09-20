@@ -22,8 +22,10 @@ https://v.kingway.fun/simage/
 
 ## 安装
 
+> 名字太像也不让 publish 😑
+
 ```bash
-pip install simple-image
+pip install simple-image-hosting
 ```
 
 
