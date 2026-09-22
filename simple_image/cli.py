@@ -39,6 +39,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Deploy under sub path, e.g. /simple_image",
     )
     serve.add_argument(
+        "--allowed-image-domain",
+        action="append",
+        default=None,
+        help="Allow image access from this domain; repeat as needed (supports *.example.com)",
+    )
+    serve.add_argument(
         "-d", "--daemon", action="store_true",
         help="Run server as a background daemon",
     )
@@ -99,6 +105,7 @@ def run_serve(args: argparse.Namespace) -> None:
         default_compress_quality=args.compress_quality,
         database_url=args.database_url,
         base_path=args.base_path,
+        allowed_image_domains=args.allowed_image_domain,
     )
     uvicorn.run(app, host=args.host, port=args.port, reload=args.reload)
 

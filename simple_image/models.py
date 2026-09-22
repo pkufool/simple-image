@@ -11,8 +11,11 @@ from sqlalchemy import (
     String,
     Table,
     create_engine,
+    event,
 )
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from sqlalchemy.pool import QueuePool, StaticPool
 
 Base = declarative_base()
 DEFAULT_COMPRESS_QUALITY = 25
@@ -88,7 +91,36 @@ def _normalize_database_url(database_url: str) -> str:
 
 
 def _is_sqlite_url(database_url: str) -> bool:
-    return database_url.startswith("sqlite://")
+    return make_url(database_url).get_backend_name() == "sqlite"
+
+
+def _is_sqlite_memory_url(database_url: str) -> bool:
+    url = make_url(database_url)
+    return _is_sqlite_url(database_url) and (
+        url.database in (None, "", ":memory:") or url.query.get("mode") == "memory"
+    )
+
+
+def _configure_sqlite_connection(dbapi_connection, _connection_record) -> None:
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA wal_autocheckpoint=1000")
+        cursor.execute("PRAGMA journal_size_limit=67108864")
+    finally:
+        cursor.close()
+
+
+def _enable_sqlite_wal(engine) -> None:
+    try:
+        with engine.connect() as connection:
+            journal_mode = connection.exec_driver_sql("PRAGMA journal_mode=WAL").scalar_one()
+    except Exception as exc:
+        raise RuntimeError("Unable to enable SQLite WAL mode") from exc
+    if str(journal_mode).lower() != "wal":
+        raise RuntimeError(f"Unable to enable SQLite WAL mode (got {journal_mode!r})")
 
 
 def _build_database_url(database_url: Optional[str], db_path: Optional[Path | str]) -> str:
@@ -108,10 +140,29 @@ def create_session_factory(
 ):
     resolved_url = _build_database_url(database_url, db_path)
     engine_kwargs = {}
-    if _is_sqlite_url(resolved_url):
-        engine_kwargs["connect_args"] = {"check_same_thread": False}
+    is_sqlite = _is_sqlite_url(resolved_url)
+    is_sqlite_memory = is_sqlite and _is_sqlite_memory_url(resolved_url)
+    if is_sqlite:
+        engine_kwargs["connect_args"] = {
+            "check_same_thread": False,
+            "timeout": 30,
+        }
+        if is_sqlite_memory:
+            engine_kwargs["poolclass"] = StaticPool
+        else:
+            engine_kwargs.update(
+                poolclass=QueuePool,
+                pool_size=5,
+                max_overflow=5,
+                pool_timeout=30,
+                pool_use_lifo=True,
+            )
 
     engine = create_engine(resolved_url, **engine_kwargs)
+    if is_sqlite:
+        event.listen(engine, "connect", _configure_sqlite_connection)
+        if not is_sqlite_memory:
+            _enable_sqlite_wal(engine)
     Base.metadata.create_all(bind=engine)
 
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)

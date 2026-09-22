@@ -5,7 +5,8 @@ import os
 import secrets
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Sequence
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 from fastapi import Cookie, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
@@ -156,6 +157,122 @@ def normalize_path_prefix(value: Optional[str]) -> str:
     return prefix.rstrip("/")
 
 
+def _normalize_domain_name(value: str) -> str:
+    domain = value.strip().rstrip(".")
+    if not domain or any(char in domain for char in "/:@?#[]"):
+        raise ValueError(f"Invalid allowed image domain: {value!r}")
+    try:
+        normalized = domain.encode("idna").decode("ascii").lower()
+    except UnicodeError as exc:
+        raise ValueError(f"Invalid allowed image domain: {value!r}") from exc
+    if len(normalized) > 253:
+        raise ValueError(f"Invalid allowed image domain: {value!r}")
+    labels = normalized.split(".")
+    if any(
+        not label
+        or len(label) > 63
+        or label.startswith("-")
+        or label.endswith("-")
+        or not all(char.isalnum() or char == "-" for char in label)
+        for label in labels
+    ):
+        raise ValueError(f"Invalid allowed image domain: {value!r}")
+    return normalized
+
+
+def normalize_allowed_image_domains(values: Optional[Sequence[str] | str]) -> tuple[str, ...]:
+    if values is None:
+        return ()
+    raw_values = values.split(",") if isinstance(values, str) else values
+    normalized = []
+    seen = set()
+    for raw_value in raw_values:
+        value = str(raw_value).strip()
+        if not value:
+            continue
+        wildcard = value.startswith("*.")
+        wildcard_in_domain = "*" in (value[2:] if wildcard else value)
+        if wildcard_in_domain:
+            raise ValueError(f"Invalid allowed image domain: {raw_value!r}")
+        domain = _normalize_domain_name(value[2:] if wildcard else value)
+        rule = f"*.{domain}" if wildcard else domain
+        if rule not in seen:
+            seen.add(rule)
+            normalized.append(rule)
+    return tuple(normalized)
+
+
+def image_domain_matches(hostname: str, allowed_domains: Sequence[str]) -> bool:
+    try:
+        normalized = _normalize_domain_name(hostname)
+    except ValueError:
+        return False
+    for rule in allowed_domains:
+        if rule.startswith("*."):
+            suffix = rule[2:]
+            if normalized.endswith(f".{suffix}"):
+                return True
+        elif normalized == rule:
+            return True
+    return False
+
+
+def _source_hostname(value: str, is_origin: bool) -> Optional[str]:
+    if not value or value.lower() == "null" or any(char in value for char in "\r\n"):
+        return None
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return None
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        return None
+    if parsed.username is not None or parsed.password is not None:
+        return None
+    if is_origin and (parsed.path not in {"", "/"} or parsed.query or parsed.fragment):
+        return None
+    if port is not None and not 1 <= port <= 65535:
+        return None
+    return parsed.hostname
+
+
+def image_response_headers(app: FastAPI) -> dict[str, str]:
+    if app.state.allowed_image_domains:
+        return {
+            "Cache-Control": "private, no-store",
+            "Vary": "Origin, Referer",
+        }
+    return {"Cache-Control": "public, max-age=2592000"}
+
+
+def enforce_image_domain(request: Request) -> None:
+    allowed_domains = request.app.state.allowed_image_domains
+    if not allowed_domains:
+        return
+
+    origins = request.headers.getlist("origin")
+    referers = request.headers.getlist("referer")
+    if origins:
+        values = origins
+        is_origin = True
+    else:
+        values = referers
+        is_origin = False
+
+    hostname = None
+    if len(values) == 1 and "," not in values[0]:
+        hostname = _source_hostname(values[0].strip(), is_origin=is_origin)
+    if not hostname or not image_domain_matches(hostname, allowed_domains):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Image source is not allowed",
+            headers={
+                "Cache-Control": "private, no-store",
+                "Vary": "Origin, Referer",
+            },
+        )
+
+
 def render_index_html(app: FastAPI) -> HTMLResponse:
     index_file = WEB_DIR / "index.html"
     if not index_file.exists():
@@ -269,6 +386,7 @@ def create_app(
     default_compress_quality: Optional[int] = None,
     database_url: Optional[str] = None,
     base_path: Optional[str] = None,
+    allowed_image_domains: Optional[Sequence[str]] = None,
 ) -> FastAPI:
     base_data_dir = Path(data_dir) if data_dir else Path(os.getenv("SIMPLE_IMAGE_DATA_DIR", "data"))
     base_data_dir.mkdir(parents=True, exist_ok=True)
@@ -277,12 +395,18 @@ def create_app(
     resolved_base_path = normalize_path_prefix(
         base_path if base_path is not None else os.getenv("SIMPLE_IMAGE_BASE_PATH") or os.getenv("BASE_PATH")
     )
+    configured_image_domains = (
+        allowed_image_domains
+        if allowed_image_domains is not None
+        else os.getenv("SIMPLE_IMAGE_ALLOWED_DOMAINS")
+    )
 
     app = FastAPI(title="Simple Image API")
     app.state.data_dir = base_data_dir
     app.state.images_dir = base_data_dir / "images"
     app.state.images_dir.mkdir(parents=True, exist_ok=True)
     app.state.api_url = api_url or os.getenv("API_URL")
+    app.state.allowed_image_domains = normalize_allowed_image_domains(configured_image_domains)
     app.state.admin_username = admin_username or os.getenv("ADMIN_USERNAME", "admin")
     app.state.admin_password = admin_password or os.getenv("ADMIN_PASSWORD", "admin123456")
     app.state.default_compress_quality = max(1, min(95, default_quality))
@@ -557,13 +681,13 @@ def _register_routes(app: FastAPI) -> None:
 
 
     @app.get("/image/{image_uuid}", response_class=FileResponse)
-    def get_image(image_uuid: str):
+    def get_image(image_uuid: str, _: None = Depends(enforce_image_domain)):
         image_path = find_image_file(app.state.images_dir, image_uuid)
         if not image_path:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
         ext = normalize_image_extension(image_path.suffix.lstrip("."))
         media_type = IMAGE_MEDIA_TYPES.get(ext, "application/octet-stream")
-        return FileResponse(path=image_path, media_type=media_type, headers={"Cache-Control": "public, max-age=2592000"})
+        return FileResponse(path=image_path, media_type=media_type, headers=image_response_headers(app))
         # db_image = db.query(Image).filter(Image.id == image_uuid).first()
         # if not db_image:
         #     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
@@ -599,6 +723,7 @@ def _register_routes(app: FastAPI) -> None:
         image_uuid: str,
         size: int = Query(default=160, ge=48, le=512),
         quality: int = Query(default=75, ge=40, le=95),
+        _: None = Depends(enforce_image_domain),
     ):
         image_path = find_image_file(app.state.images_dir, image_uuid)
         if not image_path:
@@ -614,7 +739,7 @@ def _register_routes(app: FastAPI) -> None:
         return Response(
             content=thumbnail_data,
             media_type="image/jpeg",
-            headers={"Cache-Control": "public, max-age=2592000"},
+            headers=image_response_headers(app),
         )
         # db_image = db.query(Image).filter(Image.id == image_uuid).first()
         # if not db_image:

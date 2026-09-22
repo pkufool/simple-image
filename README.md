@@ -64,12 +64,49 @@ simple-image serve ./data \
 - `--database-url`: 数据库连接串（未设置时默认使用 `data_dir/database.db`）
 - `--compress-quality`: 默认压缩质量（1-95）
 - `--base-path`: 子目录部署前缀，例如 `/simple_image`
+- `--allowed-image-domain`: 允许加载图片的来源域名，可重复指定并支持 `*.example.com`
 - `--daemon`: 守护进程后台运行
 
 也可通过环境变量配置数据库：
 
 - `SIMPLE_IMAGE_DATABASE_URL`
 - `DATABASE_URL`（兼容通用部署环境）
+
+### SQLite 性能与部署建议
+
+使用默认的本地 SQLite 数据库时，服务会自动启用以下配置：
+
+- WAL 日志模式，允许读取请求与写入请求并行执行
+- `synchronous=NORMAL`，在性能与可靠性之间取平衡
+- 30 秒锁等待，降低短时并发写入时出现 `database is locked` 的概率
+- 自动 WAL checkpoint，并将 checkpoint 后 WAL 文件的保留上限设置为 64 MiB
+- 每个进程最多 10 个数据库连接（5 个常驻连接 + 5 个临时连接）
+
+WAL 仍然只允许同一时间有一个写入者。SQLite 应存放在本机磁盘，并建议保持单个应用进程；如需多个 worker、多台主机或持续高并发写入，请使用 MySQL。不要把 WAL 数据库放在 NFS 等普通网络文件系统上。
+
+### 图片来源域名限制（可选）
+
+默认不限制来源，任何域名都可以展示公开图片。要限制 `/image/*` 和 `/thumbnail/*`，可重复指定允许的域名：
+
+```bash
+simple-image serve ./data \
+  --allowed-image-domain www.example.com \
+  --allowed-image-domain '*.trusted.example.com'
+```
+
+也可以使用逗号分隔的环境变量：
+
+```bash
+SIMPLE_IMAGE_ALLOWED_DOMAINS='www.example.com,*.trusted.example.com'
+```
+
+精确规则只匹配该域名；`*.example.com` 匹配其一级或多级子域名，但不匹配 `example.com` 本身。如两者都需要，请同时配置。域名不区分大小写。
+
+启用后采用严格模式：浏览器请求的 `Origin`（存在时优先）或 `Referer` 必须匹配规则。没有这两个请求头的地址栏直开、`curl`、隐藏 Referer 的页面以及部分隐私客户端会收到 403。Nginx 默认会转发这两个请求头，请勿主动清除。
+
+限制模式会将图片响应设置为 `private, no-store`，避免共享缓存绕过检查。启用前应清理 CDN、代理和浏览器中已有的公开图片缓存，并确保代理/CDN 不覆盖应用返回的缓存头。
+
+这项功能用于减少普通盗链和带宽滥用，不是私有访问控制；非浏览器客户端可以伪造 `Origin` 或 `Referer`。敏感图片应使用认证下载或签名 URL。
 
 也可通过环境变量配置子目录部署前缀：
 
@@ -181,4 +218,12 @@ simple-image reset-admin-password ./data \
 
 ## 备份
 
-只需备份 --data-dir 目录即可恢复或迁移整个服务。
+### SQLite
+
+- 离线备份：先停止服务，再复制整个 `--data-dir` 目录。
+- 在线备份：使用 SQLite backup API 或 `sqlite3` 的 `.backup` 命令。
+- 服务运行时不要只复制 `database.db`；WAL 模式下，已提交的数据可能仍在 `database.db-wal` 中，`database.db-wal` 和 `database.db-shm` 都属于实时数据库状态。
+
+### MySQL
+
+数据库请使用 MySQL 自身的备份工具；图片文件仍需单独备份 `--data-dir/images`。
