@@ -1,4 +1,5 @@
 import hashlib
+import html
 import json
 import mimetypes
 import os
@@ -283,8 +284,13 @@ def render_index_html(app: FastAPI) -> HTMLResponse:
         template = index_file.read_text(encoding="utf-8")
         app.state.index_html_template = template
 
-    html = template.replace("__SIMPLE_IMAGE_BASE_PATH__", app.state.base_path)
-    return HTMLResponse(content=html)
+    public_url = (app.state.api_url or "").rstrip("/")
+    rendered = template.replace("__SIMPLE_IMAGE_BASE_PATH__", app.state.base_path)
+    rendered = rendered.replace(
+        "__SIMPLE_IMAGE_PUBLIC_URL__",
+        html.escape(public_url, quote=True),
+    )
+    return HTMLResponse(content=rendered)
 
 
 def get_public_base_url(request: Request, app: FastAPI) -> str:
@@ -358,8 +364,6 @@ def _bootstrap_admin(app: FastAPI) -> None:
     try:
         admin = db.query(User).filter(User.username == app.state.admin_username).first()
         if admin:
-            admin.password_hash = hash_password(app.state.admin_password)
-            db.commit()
             return
         db.add(
             User(
@@ -1001,6 +1005,3 @@ def _register_routes(app: FastAPI) -> None:
         if index_file.exists():
             return render_index_html(app)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Frontend not built")
-
-
-app = create_app()

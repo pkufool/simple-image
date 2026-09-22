@@ -5,9 +5,15 @@ import sys
 from pathlib import Path
 
 import uvicorn
+from sqlalchemy.engine import make_url
 
-from .main import create_app, hash_password
-from .models import DEFAULT_COMPRESS_QUALITY, User, create_session_factory
+from .main import create_app, hash_password, verify_password
+from .models import (
+    DEFAULT_COMPRESS_QUALITY,
+    SessionToken,
+    User,
+    create_session_factory,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -111,23 +117,42 @@ def run_serve(args: argparse.Namespace) -> None:
 
 
 def run_reset_admin_password(args: argparse.Namespace) -> None:
-    db_path = args.data_dir / "database.db"
-    database_url = args.database_url or os.getenv("SIMPLE_IMAGE_DATABASE_URL") or os.getenv("DATABASE_URL")
+    db_path = (args.data_dir / "database.db").expanduser().resolve()
+    database_url = (
+        args.database_url
+        or os.getenv("SIMPLE_IMAGE_DATABASE_URL")
+        or os.getenv("DATABASE_URL")
+    )
     if not database_url:
         if not db_path.exists():
             print(f"Error: database not found at {db_path}", file=sys.stderr)
             raise SystemExit(1)
         database_url = f"sqlite:///{db_path}"
+        print(f"Using SQLite database: {db_path}")
+    else:
+        parsed_url = make_url(database_url)
+        if parsed_url.get_backend_name() == "sqlite" and parsed_url.database not in (
+            None,
+            "",
+            ":memory:",
+        ):
+            configured_path = Path(parsed_url.database).expanduser()
+            if not configured_path.is_absolute():
+                configured_path = (Path.cwd() / configured_path).resolve()
+            print(f"Using SQLite database: {configured_path}")
+        else:
+            print(f"Using configured database: {parsed_url.render_as_string(hide_password=True)}")
 
-    use_db_path = None if args.database_url else db_path
     session_factory = create_session_factory(
         default_compress_quality=DEFAULT_COMPRESS_QUALITY,
         database_url=database_url,
-        db_path=use_db_path,
     )
+    engine = session_factory.kw["bind"]
+    target_username = None
+    new_password = None
     db = session_factory()
     try:
-        admins = db.query(User).filter(User.is_admin == True).all()
+        admins = db.query(User).filter(User.is_admin.is_(True)).all()
 
         if not admins:
             print("Error: no admin user found in the database.", file=sys.stderr)
@@ -137,15 +162,18 @@ def run_reset_admin_password(args: argparse.Namespace) -> None:
             target = next((u for u in admins if u.username == args.username), None)
             if not target:
                 available = ", ".join(u.username for u in admins)
-                print(f"Error: admin '{args.username}' not found. Existing admins: {available}", file=sys.stderr)
+                print(
+                    f"Error: admin '{args.username}' not found. Existing admins: {available}",
+                    file=sys.stderr,
+                )
                 raise SystemExit(1)
         elif len(admins) == 1:
             target = admins[0]
             print(f"Found admin user: {target.username}")
         else:
             print("Multiple admin users found, please specify --username:")
-            for u in admins:
-                print(f"  - {u.username}")
+            for user in admins:
+                print(f"  - {user.username}")
             raise SystemExit(1)
 
         new_password = getpass.getpass(f"New password for '{target.username}': ")
@@ -157,11 +185,37 @@ def run_reset_admin_password(args: argparse.Namespace) -> None:
             print("Error: passwords do not match.", file=sys.stderr)
             raise SystemExit(1)
 
+        target_username = target.username
         target.password_hash = hash_password(new_password)
+        db.query(SessionToken).filter(SessionToken.user_id == target.id).delete()
         db.commit()
-        print(f"Password for admin '{target.username}' has been reset successfully.")
     finally:
         db.close()
+        engine.dispose()
+
+    verify_factory = create_session_factory(
+        default_compress_quality=DEFAULT_COMPRESS_QUALITY,
+        database_url=database_url,
+    )
+    verify_engine = verify_factory.kw["bind"]
+    verify_db = verify_factory()
+    try:
+        saved_admin = (
+            verify_db.query(User)
+            .filter(User.username == target_username, User.is_admin.is_(True))
+            .one_or_none()
+        )
+        if not saved_admin or not verify_password(new_password, saved_admin.password_hash):
+            print("Error: password reset could not be verified.", file=sys.stderr)
+            raise SystemExit(1)
+    finally:
+        verify_db.close()
+        verify_engine.dispose()
+
+    print(
+        f"Password for admin '{target_username}' has been reset successfully; "
+        "existing sessions were signed out."
+    )
 
 
 def main() -> None:

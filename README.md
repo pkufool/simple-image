@@ -58,9 +58,9 @@ simple-image serve ./data \
 - `--host`: 监听地址（默认 `0.0.0.0`）
 - `--port`: 监听端口（默认 `8000`）
 - `--reload`: 自动重载（开发模式）
-- `--api-url`: 对外展示的图片 URL 前缀
-- `--admin-username`: 启动时自动创建管理员用户名
-- `--admin-password`: 启动时自动创建管理员密码
+- `--api-url`: 对外展示的图片和缩略图 URL 前缀；管理 API 与下载仍使用当前站点地址
+- `--admin-username`: 仅在管理员不存在时用于首次创建
+- `--admin-password`: 仅在管理员不存在时用于首次创建，不会在重启时覆盖现有密码
 - `--database-url`: 数据库连接串（未设置时默认使用 `data_dir/database.db`）
 - `--compress-quality`: 默认压缩质量（1-95）
 - `--base-path`: 子目录部署前缀，例如 `/simple_image`
@@ -183,8 +183,10 @@ server {
 ### 直接用 uvicorn 启动
 
 ```bash
-uvicorn simple_image.main:app --host 0.0.0.0 --port 8000
+uvicorn simple_image.main:create_app --factory --host 0.0.0.0 --port 8000
 ```
+
+必须使用 `--factory`；模块导入不会创建应用或打开数据库连接。需要传入 `data_dir` 等参数时，请使用上面的 `simple-image serve` 命令。
 
 ### 默认管理员
 
@@ -203,7 +205,7 @@ uvicorn simple_image.main:app --host 0.0.0.0 --port 8000
 simple-image reset-admin-password ./data
 ```
 
-系统会自动查找唯一的 admin 用户并交互式输入新密码。如果存在多个管理员账号，需通过 `--username` 指定：
+系统会自动查找唯一的 admin 用户并交互式输入新密码。如果存在多个管理员账号，需通过 `--username` 指定。SQLite 位于本机磁盘时，服务运行期间也可以执行重置，无需重启；命令会显示实际数据库路径、重新读取数据库验证结果，并注销该管理员已有的登录会话：
 
 ```bash
 simple-image reset-admin-password ./data --username admin
