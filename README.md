@@ -58,7 +58,7 @@ simple-image serve ./data \
 - `--host`: 监听地址（默认 `0.0.0.0`）
 - `--port`: 监听端口（默认 `8000`）
 - `--reload`: 自动重载（开发模式）
-- `--api-url`: 对外展示的图片和缩略图 URL 前缀；管理 API 与下载仍使用当前站点地址
+- `--api-url`: 对外展示的图片和缩略图 URL 前缀
 - `--admin-username`: 仅在管理员不存在时用于首次创建
 - `--admin-password`: 仅在管理员不存在时用于首次创建，不会在重启时覆盖现有密码
 - `--database-url`: 数据库连接串（未设置时默认使用 `data_dir/database.db`）
