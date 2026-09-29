@@ -18,7 +18,7 @@ from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from .models import Image, SessionToken, Tag, User, create_session_factory
-from .utils import compress_image, create_thumbnail, detect_image_extension, generate_uuid, generate_uuid_filename, normalize_image_extension
+from .utils import compress_image, create_thumbnail, detect_image_extension, generate_uuid, generate_uuid_filename, is_animated_image, normalize_image_extension
 
 load_dotenv()
 
@@ -290,7 +290,18 @@ def render_index_html(app: FastAPI) -> HTMLResponse:
         "__SIMPLE_IMAGE_PUBLIC_URL__",
         html.escape(public_url, quote=True),
     )
-    return HTMLResponse(content=rendered)
+    # static/* is cached for a week, so pin the app.js URL to its mtime to let
+    # updates reach existing browsers without a hard refresh.
+    app_js = WEB_DIR / "static" / "app.js"
+    if app_js.exists():
+        rendered = rendered.replace(
+            "static/app.js",
+            f"static/app.js?v={int(app_js.stat().st_mtime)}",
+        )
+    return HTMLResponse(
+        content=rendered,
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 def get_public_base_url(request: Request, app: FastAPI) -> str:
@@ -621,7 +632,14 @@ def _register_routes(app: FastAPI) -> None:
             is_client_compressed = client_original_size is not None and client_original_size != received_size
             original_size = client_original_size if is_client_compressed else received_size
             needs_transcode = detected_extension in TRANSCODE_ONLY_EXTENSIONS
-            if is_client_compressed:
+            # Animated GIF/WebP/APNG must be stored untouched: any re-encode flattens
+            # the animation to a single frame (and canvas re-encode would turn it into PNG).
+            is_animated = is_animated_image(image_data)
+            if is_animated:
+                stored_data = image_data
+                compressed_size = received_size
+                upload_message = "Animated image uploaded as-is to preserve the animation"
+            elif is_client_compressed:
                 stored_data = image_data
                 compressed_size = received_size
                 upload_message = "Image uploaded with client-side compression"
@@ -736,6 +754,15 @@ def _register_routes(app: FastAPI) -> None:
         try:
             with open(image_path, "rb") as source_file:
                 image_data = source_file.read()
+            if is_animated_image(image_data):
+                # Serve animated originals untouched so previews keep playing.
+                ext = normalize_image_extension(image_path.suffix.lstrip("."))
+                media_type = IMAGE_MEDIA_TYPES.get(ext, "application/octet-stream")
+                return Response(
+                    content=image_data,
+                    media_type=media_type,
+                    headers=image_response_headers(app),
+                )
             thumbnail_data = create_thumbnail(image_data=image_data, size=size, quality=quality)
         except Exception as exc:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Thumbnail generation error: {str(exc)}")

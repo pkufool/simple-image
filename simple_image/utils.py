@@ -90,6 +90,29 @@ def detect_image_extension(image_data: bytes) -> str:
         raise ValueError(f"Unsupported image format: {image_format or 'unknown'}")
     return extension
 
+
+ANIMATABLE_SIGNATURES = (b"GIF8", b"RIFF", b"\x89PNG")
+
+
+def is_animated_image(image_data: bytes) -> bool:
+    """Detect multi-frame images (animated GIF/WebP/APNG).
+
+    Re-encoding flattens them to a single frame, so upload/preview paths
+    must keep the original bytes for these files.
+    """
+    if not any(image_data.startswith(signature) for signature in ANIMATABLE_SIGNATURES):
+        return False
+    try:
+        image = PILImage.open(BytesIO(image_data))
+    except Exception:
+        return False
+    if getattr(image, "is_animated", False):
+        return True
+    try:
+        return int(getattr(image, "n_frames", 1) or 1) > 1
+    except Exception:
+        return False
+
 def compress_image(image_data, file_extension, quality=None):
     original_size = len(image_data)
     img = _normalize_image_for_processing(_open_image(image_data))

@@ -72,6 +72,10 @@ simple-image serve ./data \
 - `SIMPLE_IMAGE_DATABASE_URL`
 - `DATABASE_URL`（兼容通用部署环境）
 
+### 动图（GIF）处理
+
+动图（GIF，以及动图 WebP / APNG）不会压缩、不会转码：上传前后端都会原样保存字节，预览直接使用原文件，`/image/{uuid}` 和 `/thumbnail/{uuid}` 也直接返回原图，保证动画持续播放。静态图片仍按原有流程在浏览器中压缩、并生成 JPEG 缩略图。
+
 ### SQLite 性能与部署建议
 
 使用默认的本地 SQLite 数据库时，服务会自动启用以下配置：

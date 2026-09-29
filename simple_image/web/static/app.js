@@ -60,7 +60,7 @@ const I18N_MESSAGES = {
     clientCompressQualityLabel: "画质",
     clientCompressMaxEdgeLabel: "最长边",
     uploadCompressionTitle: "图片预览",
-    uploadCompressHint: "图片上传前会在浏览器中修正方向并压缩，当前压缩率为 {quality} %。",
+    uploadCompressHint: "图片上传前会在浏览器中修正方向并压缩，当前压缩率为 {quality} %。GIF 动图除外，将原样预览和上传以保留动画。",
     localDownloadAction: "下载压缩结果",
     localClearAction: "清空",
     localCompressFailed: "本地压缩失败：{name}",
@@ -123,6 +123,10 @@ const I18N_MESSAGES = {
     maxSelectKeep: "一次最多选择 {count} 张图片，已保留前 {count} 张",
     pastedImagesAdded: "已从剪贴板添加 {count} 张图片",
     pasteImageLimitReached: "最多上传 {count} 张图片，剪贴板中的其余图片未添加",
+    droppedImagesAdded: "已添加 {count} 张拖拽的图片",
+    dropImageLimitReached: "最多上传 {count} 张图片，拖拽的其余图片未添加",
+    dropUrlFetchFailed: "无法读取拖入的图片（可能被来源站点限制），请先保存到本地再拖入文件",
+    dropNothingUsable: "没有读到可用的图片，请拖入图片文件",
     copied: "地址已复制",
     copyFailed: "复制失败，请手动复制",
     usernamePasswordRequired: "请输入用户名和密码",
@@ -175,7 +179,7 @@ const I18N_MESSAGES = {
     clientCompressQualityLabel: "Quality",
     clientCompressMaxEdgeLabel: "Max edge",
     uploadCompressionTitle: "Image preview",
-    uploadCompressHint: "Images are oriented and compressed in the browser before upload. Current compression rate: {quality}%.",
+    uploadCompressHint: "Images are oriented and compressed in the browser before upload. Current compression rate: {quality}%. Animated GIFs are excluded and previewed/uploaded as-is to keep the animation.",
     localDownloadAction: "Download result",
     localClearAction: "Clear",
     localCompressFailed: "Local compression failed: {name}",
@@ -238,6 +242,10 @@ const I18N_MESSAGES = {
     maxSelectKeep: "You can select up to {count} images; only the first {count} are kept",
     pastedImagesAdded: "Added {count} image(s) from the clipboard",
     pasteImageLimitReached: "You can upload up to {count} images; remaining clipboard images were not added",
+    droppedImagesAdded: "Added {count} dropped image(s)",
+    dropImageLimitReached: "You can upload up to {count} images; remaining dropped images were not added",
+    dropUrlFetchFailed: "Could not read the dragged image (the source site may block it); save it locally and drag the file in",
+    dropNothingUsable: "No usable image found — please drag image files in",
     copied: "Link copied",
     copyFailed: "Copy failed, please copy manually",
     usernamePasswordRequired: "Please enter username and password",
@@ -365,6 +373,76 @@ function isCanvasProcessableImage(file) {
     return !isSvgFile(file) && !isGifFile(file);
   }
   return type.startsWith("image/") || isJpegFile(file) || isPngFile(file) || isWebpFile(file);
+}
+
+function bytesToAscii(bytes, offset, length) {
+  let text = "";
+  for (let index = 0; index < length && offset + index < bytes.length; index += 1) {
+    text += String.fromCharCode(bytes[offset + index]);
+  }
+  return text;
+}
+
+// Canvas cannot re-encode GIF (toBlob("image/gif") silently emits PNG) and
+// re-rendering any animation keeps only the first frame. Detect those by content
+// so mislabeled files (wrong name/type) are passed through untouched as well.
+async function isPassthroughImageContent(file) {
+  if (isGifFile(file)) {
+    return true;
+  }
+  if (!file || typeof file.slice !== "function") {
+    return false;
+  }
+
+  const probe = new Uint8Array(await file.slice(0, 2048).arrayBuffer());
+  if (probe.length < 12) {
+    return false;
+  }
+
+  if (bytesToAscii(probe, 0, 4) === "GIF8") {
+    return true;
+  }
+
+  if (bytesToAscii(probe, 1, 3) === "PNG") {
+    let offset = 8;
+    while (offset + 8 <= probe.length) {
+      const chunkType = bytesToAscii(probe, offset + 4, 4);
+      if (chunkType === "acTL") {
+        return true;
+      }
+      if (chunkType === "IDAT" || chunkType === "IEND") {
+        return false;
+      }
+      const chunkSize =
+        ((probe[offset] << 24) |
+          (probe[offset + 1] << 16) |
+          (probe[offset + 2] << 8) |
+          probe[offset + 3]) >>>
+        0;
+      offset += 12 + chunkSize;
+    }
+    return false;
+  }
+
+  if (bytesToAscii(probe, 0, 4) === "RIFF" && bytesToAscii(probe, 8, 4) === "WEBP") {
+    let offset = 12;
+    while (offset + 8 <= probe.length) {
+      const chunkType = bytesToAscii(probe, offset, 4);
+      if (chunkType === "ANIM" || chunkType === "ANMF") {
+        return true;
+      }
+      const chunkSize =
+        (probe[offset + 4] |
+          (probe[offset + 5] << 8) |
+          (probe[offset + 6] << 16) |
+          (probe[offset + 7] << 24)) >>>
+        0;
+      offset += 8 + chunkSize + (chunkSize % 2);
+    }
+    return false;
+  }
+
+  return false;
 }
 
 function toJpegFilename(name) {
@@ -544,6 +622,16 @@ function getPreferredOutputType(file, isHeif = false) {
 }
 
 async function prepareImageForUpload(file, options = {}) {
+  // GIF 动图（以及其它动图）直接预览、原样上传：任何 canvas 重编码都会丢掉动画。
+  if (await isPassthroughImageContent(file)) {
+    return {
+      file,
+      changed: false,
+      originalSize: file.size,
+      processedSize: file.size,
+    };
+  }
+
   const compressionEnabled = !!options.enabled;
   const canProcess = isCanvasProcessableImage(file);
   const isHeif = await isHeifContainer(file);
@@ -953,6 +1041,222 @@ const app = createApp({
       ElMessage.success(this.t("pastedImagesAdded", { count: pasted.length }));
       if (isUpload && pasted.length < files.length) {
         ElMessage.warning(this.t("pasteImageLimitReached", { count: this.maxUploadCount }));
+      }
+    },
+
+    collectDroppedFiles(dataTransfer) {
+      // dataTransfer.files is empty for drags that only expose items (e.g. some
+      // desktop apps), so collect from both views and de-duplicate.
+      const files = [];
+      const seen = new Set();
+      const add = (file) => {
+        if (!file) {
+          return;
+        }
+        const key = `${file.name}:${file.size}:${file.lastModified}`;
+        if (seen.has(key)) {
+          return;
+        }
+        seen.add(key);
+        files.push(file);
+      };
+      Array.from(dataTransfer?.files || []).forEach(add);
+      Array.from(dataTransfer?.items || []).forEach((item) => {
+        if (item?.kind === "file") {
+          try {
+            add(item.getAsFile());
+          } catch (_error) {
+            // Skip entries the browser refuses to materialize.
+          }
+        }
+      });
+      return files.filter((file) => !file.type || file.type.startsWith("image/"));
+    },
+
+    isFileDrag(dataTransfer, files) {
+      if (files.length) {
+        return true;
+      }
+      const types = Array.from(dataTransfer?.types || []);
+      // "Files" covers OS file drags; the URL/html flavours cover images dragged
+      // out of chat apps and browser pages, which never expose a File at all.
+      return types.some((type) =>
+        ["Files", "text/uri-list", "text/x-moz-url", "text/html"].includes(type)
+      );
+    },
+
+    collectDroppedUrls(dataTransfer) {
+      const urls = [];
+      const add = (url) => {
+        const cleaned = (url || "").trim();
+        if (cleaned && !urls.includes(cleaned)) {
+          urls.push(cleaned);
+        }
+      };
+      // Image drags from web pages usually carry an <img src="..."> snippet.
+      const html = String(dataTransfer?.getData("text/html") || "");
+      const srcMatch = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+      if (srcMatch) {
+        add(srcMatch[1]);
+      }
+      // text/uri-list may hold several URIs, one per line ("#" starts a comment).
+      String(
+        dataTransfer?.getData("text/uri-list") ||
+          dataTransfer?.getData("text/x-moz-url") ||
+          ""
+      )
+        .split(/\r?\n/)
+        .forEach((line) => {
+          if (!line || line.startsWith("#")) {
+            return;
+          }
+          // Without the <img> signature only self-evident image URLs count, so
+          // ordinary link drags don't trigger a pointless fetch.
+          const looksLikeImage =
+            srcMatch ||
+            /^(data:image\/|blob:)/i.test(line) ||
+            /\.(gif|png|jpe?g|webp|bmp|avif|heic|heif|svg|ico|tiff?)(\?|#|$)/i.test(line);
+          if (looksLikeImage) {
+            add(line);
+          }
+        });
+      return urls.filter((url) => /^(https?:|blob:|data:image\/)/i.test(url));
+    },
+
+    async fetchDroppedUrl(url, index) {
+      try {
+        const response = await fetch(url, { credentials: "omit" });
+        if (!response.ok) {
+          return null;
+        }
+        const blob = await response.blob();
+        if (blob.type && !blob.type.startsWith("image/")) {
+          return null;
+        }
+        const path = url.split("?")[0].split("#")[0];
+        const name = decodeURIComponent(path.split("/").pop() || "") ||
+          `dropped-${Date.now()}-${index}`;
+        return new File([blob], name, { type: blob.type || "" });
+      } catch (_error) {
+        // Cross-origin images without CORS headers cannot be read by the page.
+        return null;
+      }
+    },
+
+    handleWindowDragOver(event) {
+      const dataTransfer = event.dataTransfer;
+      if (!dataTransfer) {
+        return;
+      }
+      const isFileDrag = this.isFileDrag(
+        dataTransfer,
+        this.collectDroppedFiles(dataTransfer)
+      );
+      if (!isFileDrag) {
+        return;
+      }
+      // Make the whole page a valid drop zone: otherwise a drop just outside the
+      // dashed box makes the browser navigate to the file instead of uploading.
+      event.preventDefault();
+      try {
+        dataTransfer.dropEffect = "copy";
+      } catch (_error) {
+        // Some browsers lock dropEffect; the default action is still prevented.
+      }
+    },
+
+    async handleWindowDrop(event) {
+      const dataTransfer = event.dataTransfer;
+      if (!dataTransfer) {
+        return;
+      }
+      const droppedFiles = this.collectDroppedFiles(dataTransfer);
+      const urls = this.collectDroppedUrls(dataTransfer);
+      if (!this.isFileDrag(dataTransfer, droppedFiles)) {
+        return;
+      }
+      // Dropping text into an input must keep working (e.g. pasted credentials).
+      const target = event.target;
+      const onEditable =
+        target && typeof target.closest === "function"
+          ? target.closest("input, textarea, select, [contenteditable='true']")
+          : null;
+      if (onEditable && !droppedFiles.length) {
+        return;
+      }
+      event.preventDefault();
+
+      let files = droppedFiles;
+      if (!files.length && urls.length) {
+        // URL-only drag (image pulled out of a chat app or web page): turn it
+        // into a File so the rest of the upload flow stays unchanged.
+        files = (
+          await Promise.all(
+            urls.map((url, index) => this.fetchDroppedUrl(url, index))
+          )
+        ).filter(Boolean);
+        if (!files.length) {
+          // Take over anyway so el-upload doesn't add a half-dead entry.
+          event.stopPropagation();
+          document
+            .querySelectorAll(".el-upload-dragger.is-dragover")
+            .forEach((el) => el.classList.remove("is-dragover"));
+          ElMessage.error(this.t("dropUrlFetchFailed"));
+          return;
+        }
+      }
+      if (!files.length) {
+        // File-ish drag but nothing image-shaped (e.g. a PDF): tell the user
+        // instead of silently doing nothing. Plain text drags stay quiet.
+        event.stopPropagation();
+        document
+          .querySelectorAll(".el-upload-dragger.is-dragover")
+          .forEach((el) => el.classList.remove("is-dragover"));
+        const looksFileish =
+          Array.from(dataTransfer?.types || []).includes("Files") ||
+          Array.from(dataTransfer?.items || []).some((item) => item?.kind === "file");
+        if (looksFileish) {
+          ElMessage.error(this.t("dropNothingUsable"));
+        }
+        return;
+      }
+      // Take over from el-upload so files are added exactly once regardless of
+      // where they land (on the dashed box or anywhere else on the page).
+      event.stopPropagation();
+      document
+        .querySelectorAll(".el-upload-dragger.is-dragover")
+        .forEach((el) => el.classList.remove("is-dragover"));
+
+      const isUpload = this.activeTab !== "compress";
+      if (!["upload", "compress"].includes(this.activeTab)) {
+        this.activeTab = "upload";
+      }
+      const remaining = isUpload
+        ? Math.max(0, this.maxUploadCount - this.fileList.length)
+        : files.length;
+      const dropped = files.slice(0, remaining).map((file, index) => ({
+        name: file.name || `dropped-${Date.now()}-${index}`,
+        percentage: 0,
+        raw: file,
+        size: file.size,
+        status: "ready",
+        uid: `drop-${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`,
+      }));
+      if (!dropped.length) {
+        ElMessage.error(this.t("dropImageLimitReached", { count: this.maxUploadCount }));
+        return;
+      }
+
+      if (isUpload) {
+        this.fileList = [...this.fileList, ...dropped];
+        await this.syncUploadItems();
+      } else {
+        this.compressFileList = [...this.compressFileList, ...dropped];
+        await this.syncCompressItems();
+      }
+      ElMessage.success(this.t("droppedImagesAdded", { count: dropped.length }));
+      if (dropped.length < files.length) {
+        ElMessage.warning(this.t("dropImageLimitReached", { count: this.maxUploadCount }));
       }
     },
 
@@ -1582,6 +1886,10 @@ const app = createApp({
   },
   async mounted() {
     window.addEventListener("paste", this.handlePaste);
+    // Capture phase: el-upload's dragger stops propagation on drop, which would
+    // otherwise hide drops that land on the dashed box from the window handler.
+    window.addEventListener("dragover", this.handleWindowDragOver, true);
+    window.addEventListener("drop", this.handleWindowDrop, true);
     await this.init();
     const boot = document.getElementById("app-boot");
     if (boot) {
@@ -1593,6 +1901,8 @@ const app = createApp({
   },
   beforeUnmount() {
     window.removeEventListener("paste", this.handlePaste);
+    window.removeEventListener("dragover", this.handleWindowDragOver, true);
+    window.removeEventListener("drop", this.handleWindowDrop, true);
     this.cleanupUploadObjectUrls();
     this.cleanupCompressObjectUrls();
   },
