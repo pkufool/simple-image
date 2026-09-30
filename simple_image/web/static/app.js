@@ -60,7 +60,7 @@ const I18N_MESSAGES = {
     clientCompressQualityLabel: "画质",
     clientCompressMaxEdgeLabel: "最长边",
     uploadCompressionTitle: "图片预览",
-    uploadCompressHint: "图片上传前会在浏览器中修正方向并压缩，当前压缩率为 {quality} %。GIF 动图除外，将原样预览和上传以保留动画。",
+    uploadCompressHint: "图片上传前会在浏览器中修正方向并压缩，当前压缩率为 {quality} %。GIF 动图除外，将原样预览和上传以保留动画。粘贴添加的 PNG 会转成 JPG 以节省空间（不保留透明）。",
     localDownloadAction: "下载压缩结果",
     localClearAction: "清空",
     localCompressFailed: "本地压缩失败：{name}",
@@ -157,7 +157,7 @@ const I18N_MESSAGES = {
     uploadSettingsSaveFailed: "保存上传设置失败",
     monthLabel: "{year}年{month}月",
     compressionRateInfo: "压缩率：{rate}%",
-    localCompressUploadTip: "不限图片数量和文件大小；仅在浏览器本地处理，不会上传到服务器。",
+    localCompressUploadTip: "不限图片数量和文件大小；仅在浏览器本地处理，不会上传到服务器。粘贴添加的 PNG 会转成 JPG。",
     uploadMonthStart: "开始月份",
     uploadMonthEnd: "结束月份",
     rangeSeparator: "至",
@@ -179,7 +179,7 @@ const I18N_MESSAGES = {
     clientCompressQualityLabel: "Quality",
     clientCompressMaxEdgeLabel: "Max edge",
     uploadCompressionTitle: "Image preview",
-    uploadCompressHint: "Images are oriented and compressed in the browser before upload. Current compression rate: {quality}%. Animated GIFs are excluded and previewed/uploaded as-is to keep the animation.",
+    uploadCompressHint: "Images are oriented and compressed in the browser before upload. Current compression rate: {quality}%. Animated GIFs are excluded and previewed/uploaded as-is to keep the animation. Pasted PNGs are converted to JPG to save space (transparency is dropped).",
     localDownloadAction: "Download result",
     localClearAction: "Clear",
     localCompressFailed: "Local compression failed: {name}",
@@ -276,7 +276,7 @@ const I18N_MESSAGES = {
     uploadSettingsSaveFailed: "Failed to save upload settings",
     monthLabel: "{year}-{month}",
     compressionRateInfo: "Compression rate: {rate}%",
-    localCompressUploadTip: "No image-count or file-size limit. Processing is local and never uploads files.",
+    localCompressUploadTip: "No image-count or file-size limit. Processing is local and never uploads files. Pasted PNGs are converted to JPG.",
     uploadMonthStart: "Start month",
     uploadMonthEnd: "End month",
     rangeSeparator: "to",
@@ -619,6 +619,34 @@ function getPreferredOutputType(file, isHeif = false) {
     return "image/png";
   }
   return String(file?.type || "image/jpeg").toLowerCase() || "image/jpeg";
+}
+
+// 粘贴添加的图片多是网页上复制的 PNG，一般不需要透明通道，先转成 JPG 省空间；
+// 转换后再交给原有的压缩逻辑处理（与普通 JPG 一致）。动图（GIF/APNG）原样保留。
+async function convertPngToJpeg(file) {
+  if (!isPngFile(file) || (await isPassthroughImageContent(file))) {
+    return file;
+  }
+
+  let imageSource = null;
+  try {
+    imageSource = await decodeImageSource(file);
+    const width = imageSource.naturalWidth || imageSource.width;
+    const height = imageSource.naturalHeight || imageSource.height;
+    const canvas = createRenderCanvas(width, height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("Canvas 2D not available");
+    }
+    // JPG 不支持透明，透明区域填白。
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(imageSource, 0, 0, width, height);
+    const blob = await canvasToBlob(canvas, "image/jpeg", 0.92);
+    return blobToFile(blob, toJpegFilename(file.name), "image/jpeg");
+  } finally {
+    closeImageSource(imageSource);
+  }
 }
 
 async function prepareImageForUpload(file, options = {}) {
@@ -1024,6 +1052,7 @@ const app = createApp({
         raw: file,
         size: file.size,
         status: "ready",
+        fromPaste: true,
         uid: `clipboard-${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`,
       }));
       if (!pasted.length) {
@@ -1388,7 +1417,9 @@ const app = createApp({
           continue;
         }
         try {
-          const prepared = await prepareImageForUpload(raw, {
+          // 粘贴的 PNG 先转成 JPG，再走原有压缩逻辑（与普通 JPG 一致）。
+          const source = item.fromPaste ? await convertPngToJpeg(raw) : raw;
+          const prepared = await prepareImageForUpload(source, {
             enabled: !!this.user?.compress_enabled,
             quality: this.userUploadQuality,
             maxEdge: null,
@@ -1402,9 +1433,9 @@ const app = createApp({
             preview: URL.createObjectURL(prepared.file),
             tags: existingTags.get(item.uid) || [],
             previewFailed: false,
-            originalSize: prepared.originalSize,
+            originalSize: raw.size,
             processedSize: prepared.processedSize,
-            changed: prepared.changed,
+            changed: prepared.changed || source !== raw,
             error: "",
           });
         } catch (_error) {
@@ -1442,7 +1473,9 @@ const app = createApp({
           continue;
         }
         try {
-          const prepared = await prepareImageForUpload(item.raw, this.buildClientCompressionOptions());
+          // 粘贴的 PNG 先转成 JPG，再走原有压缩逻辑（与普通 JPG 一致）。
+          const source = item.fromPaste ? await convertPngToJpeg(item.raw) : item.raw;
+          const prepared = await prepareImageForUpload(source, this.buildClientCompressionOptions());
           if (currentToken !== this.compressBuildToken) {
             return;
           }
@@ -1450,9 +1483,9 @@ const app = createApp({
             uid: item.uid,
             file: prepared.file,
             preview: URL.createObjectURL(prepared.file),
-            originalSize: prepared.originalSize,
+            originalSize: item.raw.size,
             processedSize: prepared.processedSize,
-            changed: prepared.changed,
+            changed: prepared.changed || source !== item.raw,
             error: "",
           });
         } catch (error) {
